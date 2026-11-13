@@ -74,6 +74,13 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p artifacts
+          retry_stapler() {
+            for attempt in 1 2 3; do
+              if xcrun stapler "$@"; then return 0; fi
+              if [ "$attempt" -lt 3 ]; then sleep $((attempt * 5)); fi
+            done
+            return 1
+          }
           B=src-tauri/target/universal-apple-darwin/release/bundle
           APP="$B/macos/StarNexus Key Tool.app"
           test -d "$APP"
@@ -88,13 +95,13 @@ jobs:
           codesign --force --sign "$APPLE_SIGNING_IDENTITY" --timestamp "$DMG"
           codesign --verify --strict --verbose=2 "$DMG"
           if [ "$NOTARIZE" = true ]; then
-            xcrun stapler staple "$APP"
-            xcrun stapler validate "$APP"
+            retry_stapler staple "$APP"
+            retry_stapler validate "$APP"
             spctl --assess --type execute --verbose=4 "$APP" 2>&1 | tee -a artifacts/macOS-signature-verification.txt
             xcrun notarytool submit "$DMG" --key "$RUNNER_TEMP/starnexus-notary.p8" --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER" --wait --timeout 20m --output-format json > "$RUNNER_TEMP/starnexus-notary-result.json"
             python3 -c 'import json,os; r=json.load(open(os.environ["RUNNER_TEMP"]+"/starnexus-notary-result.json")); assert r["status"]=="Accepted",r; print("DMG notarization: Accepted")'
-            xcrun stapler staple "$DMG"
-            xcrun stapler validate "$DMG"
+            retry_stapler staple "$DMG"
+            retry_stapler validate "$DMG"
             spctl --assess --type open --context context:primary-signature --verbose=4 "$DMG" 2>&1 | tee -a artifacts/macOS-signature-verification.txt
           fi
           printf '\nSource commit: %s\nNotarized: %s\n' "$GITHUB_SHA" "$NOTARIZE" >> artifacts/macOS-signature-verification.txt

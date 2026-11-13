@@ -41,6 +41,13 @@ jobs:
             test -n "${!name}" || { echo "::error::Missing notarization secret: $name"; exit 1; }
           done
           KEY="$RUNNER_TEMP/starnexus-notary.p8"
+          retry_stapler() {
+            for attempt in 1 2 3; do
+              if xcrun stapler "$@"; then return 0; fi
+              if [ "$attempt" -lt 3 ]; then sleep $((attempt * 5)); fi
+            done
+            return 1
+          }
           printf '%s' "$APPLE_API_PRIVATE_KEY" > "$KEY"
           DMG=artifacts/StarNexus-Key-Tool_macOS_universal.dmg
           ditto -x -k artifacts/StarNexus-Key-Tool_macOS_universal.zip "$RUNNER_TEMP/app"
@@ -52,10 +59,10 @@ jobs:
           # Notarizing a signed DMG also scans and approves its contained application.
           xcrun notarytool submit "$DMG" --key "$KEY" --key-id "$APPLE_API_KEY" --issuer "$APPLE_API_ISSUER" --wait --timeout 25m --output-format json > "$RUNNER_TEMP/notary-result.json"
           python3 -c 'import json,os; r=json.load(open(os.environ["RUNNER_TEMP"]+"/notary-result.json")); assert r["status"]=="Accepted",r; print("Apple notarization: Accepted")'
-          xcrun stapler staple "$DMG"
-          xcrun stapler validate "$DMG"
-          xcrun stapler staple "$APP"
-          xcrun stapler validate "$APP"
+          retry_stapler staple "$DMG"
+          retry_stapler validate "$DMG"
+          retry_stapler staple "$APP"
+          retry_stapler validate "$APP"
           spctl --assess --type execute --verbose=4 "$APP" 2>&1 | tee -a artifacts/macOS-signature-verification.txt
           spctl --assess --type open --context context:primary-signature --verbose=4 "$DMG" 2>&1 | tee -a artifacts/macOS-signature-verification.txt
           codesign --verify --deep --strict --verbose=2 "$APP"
