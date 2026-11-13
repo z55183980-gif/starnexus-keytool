@@ -1,0 +1,78 @@
+name: Notarize existing StarNexus Mac package
+on:
+  workflow_dispatch:
+    inputs:
+      source_run:
+        description: Successful StarNexus installers run ID
+        required: true
+        type: string
+permissions:
+  contents: read
+  actions: read
+jobs:
+  notarize:
+    runs-on: macos-15-intel
+    timeout-minutes: 45
+    steps:
+      - name: Download signed package from this repository
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_RUN: ${{ inputs.source_run }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_RUN" =~ ^[0-9]+$ ]] || exit 1
+          gh run view "$SOURCE_RUN" --repo "$GITHUB_REPOSITORY" --json conclusion --jq '.conclusion' | grep -Fx success
+          gh run download "$SOURCE_RUN" --repo "$GITHUB_REPOSITORY" --name StarNexus-macOS --dir artifacts
+          cd artifacts
+          shasum -a 256 -c SHA256SUMS-macOS.txt
+          grep -F 'Authority=Developer ID Application:' macOS-signature-verification.txt
+          grep -F 'TeamIdentifier=YU6GT6HQJ8' macOS-signature-verification.txt
+      - name: Notarize and staple application and installer
+        env:
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_PRIVATE_KEY: ${{ secrets.APPLE_API_PRIVATE_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          for name in APPLE_API_ISSUER APPLE_API_KEY APPLE_API_PRIVATE_KEY; do
+            test -n "${!name}" || { echo "::error::Missing notarization secret: $name"; exit 1; }
+          done
+          KEY="$RUNNER_TEMP/starnexus-notary.p8"
+          printf '%s' "$APPLE_API_PRIVATE_KEY" > "$KEY"
+          DMG=artifacts/StarNexus-Key-Tool_macOS_universal.dmg
+          ditto -x -k artifacts/StarNexus-Key-Tool_macOS_universal.zip "$RUNNER_TEMP/app"
+          APP="$RUNNER_TEMP/app/StarNexus Key Tool.app"
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          codesign --verify --strict --verbose=2 "$DMG"
+          /usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$APP/Contents/Info.plist" | grep -Fx com.dkby.starnexus.keytool
+          codesign --display --verbose=4 "$APP" 2>&1 | grep -F 'TeamIdentifier=YU6GT6HQJ8'
+          # Notarizing a signed DMG also scans and approves its contained application.
+          xcrun notarytool submit "$DMG" --key "$KEY" --key-id "$APPLE_API_KEY" --issuer "$APPLE_API_ISSUER" --wait --timeout 25m --output-format json > "$RUNNER_TEMP/notary-result.json"
+          python3 -c 'import json,os; r=json.load(open(os.environ["RUNNER_TEMP"]+"/notary-result.json")); assert r["status"]=="Accepted",r; print("Apple notarization: Accepted")'
+          xcrun stapler staple "$DMG"
+          xcrun stapler validate "$DMG"
+          xcrun stapler staple "$APP"
+          xcrun stapler validate "$APP"
+          spctl --assess --type execute --verbose=4 "$APP" 2>&1 | tee -a artifacts/macOS-signature-verification.txt
+          spctl --assess --type open --context context:primary-signature --verbose=4 "$DMG" 2>&1 | tee -a artifacts/macOS-signature-verification.txt
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          codesign --verify --strict --verbose=2 "$DMG"
+          # Replace the ZIP only after its application has received the offline ticket.
+          rm artifacts/StarNexus-Key-Tool_macOS_universal.zip
+          ditto -c -k --sequesterRsrc --keepParent "$APP" artifacts/StarNexus-Key-Tool_macOS_universal.zip
+          python3 -c 'from pathlib import Path; p=Path("artifacts/macOS-signature-verification.txt"); p.write_text(p.read_text().replace("Notarized: false", "Notarized: true")+"Apple notarization: Accepted\nApplication and DMG staple validation: passed\n")'
+          cd artifacts
+          rm SHA256SUMS-macOS.txt
+          shasum -a 256 * > SHA256SUMS-macOS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: StarNexus-macOS-notarized
+          path: artifacts/*
+          retention-days: 30
+      - name: Clean notarization credential
+        if: always()
+        shell: bash
+        run: rm -f "$RUNNER_TEMP/starnexus-notary.p8"

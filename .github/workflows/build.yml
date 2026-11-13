@@ -36,7 +36,7 @@ jobs:
         run: |
           set -euo pipefail
           umask 077
-          for name in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD KEYCHAIN_PASSWORD; do
+          for name in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD KEYCHAIN_PASSWORD APPLE_API_ISSUER APPLE_API_KEY APPLE_API_PRIVATE_KEY; do
             test -n "${!name}" || { echo "::error::Missing signing secret: $name"; exit 1; }
           done
           KEYCHAIN="$RUNNER_TEMP/starnexus-signing.keychain-db"
@@ -51,13 +51,8 @@ jobs:
           test -n "$IDENTITY" || { echo '::error::Developer ID Application identity not found'; exit 1; }
           echo "APPLE_SIGNING_IDENTITY=$IDENTITY" >> "$GITHUB_ENV"
           rm -f "$RUNNER_TEMP/starnexus-cert.p12"
-          if [ -n "$APPLE_API_ISSUER" ] && [ -n "$APPLE_API_KEY" ] && [ -n "$APPLE_API_PRIVATE_KEY" ]; then
-            printf '%s' "$APPLE_API_PRIVATE_KEY" > "$RUNNER_TEMP/starnexus-notary.p8"
-            echo 'NOTARIZE=true' >> "$GITHUB_ENV"
-          else
-            echo 'NOTARIZE=false' >> "$GITHUB_ENV"
-            echo '::warning::Developer ID signing is enabled; notarization credentials are not yet configured.'
-          fi
+          printf '%s' "$APPLE_API_PRIVATE_KEY" > "$RUNNER_TEMP/starnexus-notary.p8"
+          echo 'NOTARIZE=true' >> "$GITHUB_ENV"
       - name: Build universal macOS installer
         shell: bash
         env:

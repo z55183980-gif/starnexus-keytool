@@ -53,8 +53,10 @@ npm run tauri build
 
 Windows 输出 NSIS EXE 和 MSI。macOS 使用独立仓库的 GitHub Actions，在 Mac runner 上生成 Intel + Apple Silicon 通用 DMG / APP ZIP。产物放在 artifacts；不自动部署网站或发布公开 Release。
 
-Windows 当前未做商业代码签名，可能提示未知发布者。macOS 构建必须使用现有账号的 Developer ID Application 证书，签名材料通过本仓库独立的 Actions secrets 配置，不修改其他项目。配置 APPLE_API_ISSUER / APPLE_API_KEY / APPLE_API_PRIVATE_KEY 后同时执行 Apple 公证与票据装订；缺少公证凭据时明确标记为仅签名，不声称已公证。
+Windows 当前未做商业代码签名，可能提示未知发布者。macOS 构建使用现有账号的 Developer ID Application 证书，签名材料通过本仓库独立的 Actions secrets 配置，不修改其他项目。现已配置 APPLE_API_ISSUER / APPLE_API_KEY / APPLE_API_PRIVATE_KEY，同时执行 Apple 公证与票据装订；签名或公证凭据缺失时构建失败。
 
 Mac 产物附带 macOS-signature-verification.txt，记录签名身份、Team ID、源码提交和公证状态。签名私钥不进入代码或安装包；CI 使用临时钥匙串并在任务结束后清理。
+
+如需为同仓库已签名的安装包补做公证，可手动运行 Notarize existing StarNexus Mac package 工作流，传入原成功构建 run ID。该流程会先核对原 SHA256、签名及应用标识，再公证、装订票据和验证 Gatekeeper，不重新编译。
 
 Logo 直接复制自 D:/projects/starnexus/web/default/public/logo.png；安装图标通过 Tauri icon 生成。源功能快照版本见 source-revision.txt；此后本项目独立维护，不回写原项目。
