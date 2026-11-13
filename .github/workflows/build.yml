@@ -24,10 +24,58 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: cargo test --manifest-path src-tauri/Cargo.toml --all-targets
+      - name: Import Developer ID certificate
+        shell: bash
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_PRIVATE_KEY: ${{ secrets.APPLE_API_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          umask 077
+          for name in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD KEYCHAIN_PASSWORD; do
+            test -n "${!name}" || { echo "::error::Missing signing secret: $name"; exit 1; }
+          done
+          KEYCHAIN="$RUNNER_TEMP/starnexus-signing.keychain-db"
+          printf '%s' "$APPLE_CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/starnexus-cert.p12"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security default-keychain -s "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security import "$RUNNER_TEMP/starnexus-cert.p12" -k "$KEYCHAIN" -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign -T /usr/bin/security
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          IDENTITY=$(security find-identity -v -p codesigning "$KEYCHAIN" | grep 'Developer ID Application:' | grep 'YU6GT6HQJ8' | grep -oE '"[^"]+"' | head -1 | tr -d '"')
+          test -n "$IDENTITY" || { echo '::error::Developer ID Application identity not found'; exit 1; }
+          echo "APPLE_SIGNING_IDENTITY=$IDENTITY" >> "$GITHUB_ENV"
+          rm -f "$RUNNER_TEMP/starnexus-cert.p12"
+          if [ -n "$APPLE_API_ISSUER" ] && [ -n "$APPLE_API_KEY" ] && [ -n "$APPLE_API_PRIVATE_KEY" ]; then
+            printf '%s' "$APPLE_API_PRIVATE_KEY" > "$RUNNER_TEMP/starnexus-notary.p8"
+            echo 'NOTARIZE=true' >> "$GITHUB_ENV"
+          else
+            echo 'NOTARIZE=false' >> "$GITHUB_ENV"
+            echo '::warning::Developer ID signing is enabled; notarization credentials are not yet configured.'
+          fi
       - name: Build universal macOS installer
-        run: npm run tauri build -- --target universal-apple-darwin --bundles app,dmg
+        shell: bash
+        env:
+          NOTARY_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          NOTARY_KEY_ID: ${{ secrets.APPLE_API_KEY }}
+        run: |
+          set -euo pipefail
+          if [ "$NOTARIZE" = true ]; then
+            export APPLE_API_ISSUER="$NOTARY_ISSUER"
+            export APPLE_API_KEY="$NOTARY_KEY_ID"
+            export APPLE_API_KEY_PATH="$RUNNER_TEMP/starnexus-notary.p8"
+          fi
+          npm run tauri build -- --target universal-apple-darwin --bundles app,dmg
       - name: Collect and verify
         shell: bash
+        env:
+          NOTARY_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          NOTARY_KEY_ID: ${{ secrets.APPLE_API_KEY }}
         run: |
           set -euo pipefail
           mkdir -p artifacts
@@ -36,6 +84,25 @@ jobs:
           test -d "$APP"
           /usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$APP/Contents/Info.plist" | grep -Fx 'com.dkby.starnexus.keytool'
           lipo -info "$APP/Contents/MacOS/starnexus-keytool"
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          codesign --display --verbose=4 "$APP" 2>&1 | tee artifacts/macOS-signature-verification.txt
+          grep -F 'Authority=Developer ID Application:' artifacts/macOS-signature-verification.txt
+          grep -F 'TeamIdentifier=YU6GT6HQJ8' artifacts/macOS-signature-verification.txt
+          DMG=$(find "$B/dmg" -maxdepth 1 -name '*.dmg' -type f | head -1)
+          test -n "$DMG"
+          codesign --force --sign "$APPLE_SIGNING_IDENTITY" --timestamp "$DMG"
+          codesign --verify --strict --verbose=2 "$DMG"
+          if [ "$NOTARIZE" = true ]; then
+            xcrun stapler staple "$APP"
+            xcrun stapler validate "$APP"
+            spctl --assess --type execute --verbose=4 "$APP" 2>&1 | tee -a artifacts/macOS-signature-verification.txt
+            xcrun notarytool submit "$DMG" --key "$RUNNER_TEMP/starnexus-notary.p8" --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER" --wait --timeout 20m --output-format json > "$RUNNER_TEMP/starnexus-notary-result.json"
+            python3 -c 'import json,os; r=json.load(open(os.environ["RUNNER_TEMP"]+"/starnexus-notary-result.json")); assert r["status"]=="Accepted",r; print("DMG notarization: Accepted")'
+            xcrun stapler staple "$DMG"
+            xcrun stapler validate "$DMG"
+            spctl --assess --type open --context context:primary-signature --verbose=4 "$DMG" 2>&1 | tee -a artifacts/macOS-signature-verification.txt
+          fi
+          printf '\nSource commit: %s\nNotarized: %s\n' "$GITHUB_SHA" "$NOTARIZE" >> artifacts/macOS-signature-verification.txt
           ditto -c -k --sequesterRsrc --keepParent "$APP" artifacts/StarNexus-Key-Tool_macOS_universal.zip
           cp "$B"/dmg/*.dmg artifacts/StarNexus-Key-Tool_macOS_universal.dmg
           cd artifacts
@@ -45,3 +112,10 @@ jobs:
           name: StarNexus-macOS
           path: artifacts/*
           retention-days: 30
+      - name: Clean signing credentials
+        if: always()
+        shell: bash
+        run: |
+          KEYCHAIN="$RUNNER_TEMP/starnexus-signing.keychain-db"
+          if [ -f "$KEYCHAIN" ]; then security delete-keychain "$KEYCHAIN"; fi
+          rm -f "$RUNNER_TEMP/starnexus-cert.p12" "$RUNNER_TEMP/starnexus-notary.p8"

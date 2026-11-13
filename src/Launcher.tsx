@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
+import { writeText } from "@tauri-apps/plugin-clipboard-manager";
+import { diagnosticReport } from "./diagnosticReport";
 import * as api from "./api";
 import { ClaudeIcon, CodexIcon } from "./BrandIcons";
 import { UiIcon } from "./UiIcon";
-import { OutputConsole, type ConsolePrompt, type ConsoleStatus, type LogAction, type LogKind, type LogLine } from "./OutputConsole";
+import { OutputConsole, type ConsoleStatus, type LogAction, type LogKind, type LogLine } from "./OutputConsole";
 import { EFFORTS, effortLabel, groupByFamily, supports } from "./modelFamilies";
 import { LANGS, setLang, t, useLang } from "./i18n";
-import { profileTitle, supportsTool, type Diagnosis, type Environment, type HealthFix, type HealthIssue, type LauncherPreferences, type LauncherScan, type LaunchMode, type LaunchTarget, type Profile, type ToolId, type ModelInfo } from "./types";
+import { profileTitle, supportsTool, type Environment, type HealthFix, type HealthIssue, type LauncherPreferences, type LauncherScan, type LaunchMode, type LaunchTarget, type Profile, type ToolId, type ModelInfo } from "./types";
 
 const TOOLS = { claude: { name: "Claude", cli: "Claude Code", Icon: ClaudeIcon }, codex: { name: "Codex", cli: "Codex CLI", Icon: CodexIcon } };
 const TOOL_IDS: ToolId[] = ["claude", "codex"];
@@ -67,7 +69,6 @@ export function Launcher(props: {
   onRefresh: () => Promise<void>;
   checkHealth: (tool: ToolId, service: string, mode: LaunchMode) => Promise<HealthIssue[]>;
   onFix: (tool: ToolId, profileId: string | null, fix: Exclude<HealthFix, "none" | "model">, mode: LaunchMode) => Promise<boolean> | boolean;
-  diagnose: (tool: ToolId, mode: LaunchMode, service: string, profileId: string, note: string) => Promise<Diagnosis>;
   onAlerts: (alerts: ToolAlerts) => void;
   /** 在浏览器打开开发者控制台 */
   onConsole: () => void;
@@ -79,7 +80,7 @@ export function Launcher(props: {
   onSaveModel: (profileId: string, patch: { claudeModel?: string; codexModel?: string; codexEffort?: string }) => Promise<boolean>;
   /** 这把密钥能用的模型 */
   listModels: (profileId: string) => Promise<ModelInfo[]>;
-  /** 输出面板：记录由 App 统一保存，工具页在这里画并写入体检、AI 诊断的结果 */
+  /** 输出面板：记录由 App 统一保存，工具页在这里画并写入体检的结果 */
   logs: LogLine[];
   log: (kind: LogKind, text: string, extra?: { group?: string; batch?: number; actions?: LogAction[] }) => void;
   nextBatch: () => number;
@@ -124,8 +125,6 @@ export function Launcher(props: {
   const [streaming, setStreaming] = useState(false);
   /** 已经自动或手动读过一次安装情况，避免重复扫描 */
   const scanned = useRef(false);
-  /** 正在做 AI 诊断的工具 */
-  const [thinking, setThinking] = useState<ToolId | null>(null);
   /** 输出行上的按钮可能要先切到对应工具页再打开弹窗：切页会清掉弹窗，所以先记下来，切完再执行 */
   const pendingAfterPage = useRef<(() => void) | null>(null);
   const pageRef = useRef(props.page);
@@ -251,7 +250,7 @@ export function Launcher(props: {
       .catch(e => setModelList(l => l?.profileId === p.id ? { profileId: p.id, models: [], error: e instanceof Error ? e.message : String(e) } : l));
   };
 
-  /** 一个工具当前选的服务，以及修复、AI 诊断各用哪把密钥 */
+  /** 一个工具当前选的服务，以及修复使用的密钥 */
   const ctxFor = (tool: ToolId) => {
     const service = serviceFor(tool);
     const config = cfg(tool);
@@ -259,11 +258,8 @@ export function Launcher(props: {
     const selected = props.profiles.find(p => p.id === service);
     // 修复要用一把 AI 密钥写入：优先所选的，其次当前配置正在用的；选了官方服务时不提供写入
     const fixProfile = service === "official" ? null : selected?.hasKey ? selected.id : activeProfile?.hasKey ? activeProfile.id : null;
-    // AI 诊断只用 AI 密钥：所选 AI → 当前在用 AI → 任一可用 AI；其他渠道不参与诊断
-    const ai = (p?: Profile) => !!p?.hasKey && !p.custom;
-    const aiProfile = (ai(selected) ? selected : ai(activeProfile) ? activeProfile : props.profiles.find(ai))?.id;
     const serviceLabel = service === "current" ? t("保持现有配置") : service === "official" ? t("官方服务") : selected?.name ?? t("所选密钥");
-    return { service, config, activeProfile, selected, fixProfile, aiProfile, serviceLabel };
+    return { service, config, activeProfile, selected, fixProfile, serviceLabel };
   };
   /** 在某个工具页上做事：不在那一页就先切过去 */
   const onToolPage = (tool: ToolId, run: () => void) => {
@@ -357,12 +353,12 @@ export function Launcher(props: {
     if (envReportWanted && reportEnvironment()) setEnvReportWanted(false);
   }, [envReportWanted, scan, props.env, overrides]);
 
-  /** 体检 / AI 给出的动作 → 输出行尾的按钮 */
-  const fixAction = (tool: ToolId, fix: HealthFix, opts: { verifyAfterWrite?: boolean } = {}): LogAction | null => {
+  /** 体检给出的动作 → 输出行尾的按钮 */
+  const fixAction = (tool: ToolId, fix: HealthFix): LogAction | null => {
     const c = ctxFor(tool);
     const pickKey: LogAction = { label: t("选择密钥"), run: () => onToolPage(tool, () => setPicker("service")) };
     // rebuild_minimal_config only rebuilds Codex's config.toml. Never expose it
-    // as a possible action for Claude, even if a model returns the wrong action.
+    // as a possible action for Claude.
     if (fix === "rebuild" && tool !== "codex") return null;
     switch (fix) {
       case "none": return null;
@@ -379,7 +375,7 @@ export function Launcher(props: {
           label: fix === "rebuild" ? t("重建配置") : t("修复"),
           run: async () => {
             const applied = await props.onFix(tool, id, fix, modeOf(tool));
-            if (opts.verifyAfterWrite && applied && (fix === "rewrite" || fix === "rebuild")) {
+            if (applied && (fix === "rewrite" || fix === "rebuild")) {
               await verifyAfterFix(tool, id);
             }
           },
@@ -400,7 +396,7 @@ export function Launcher(props: {
       props.log(issue.level === "error" ? "err" : "warn", t(issue.text), { group, batch, actions });
     }
   };
-  /** AI 写入成功后立即复检，避免只看到“已写入”而不知道实际是否生效。 */
+  /** 修复写入成功后立即复检，避免只看到“已写入”而不知道实际是否生效。 */
   const verifyAfterFix = async (tool: ToolId, service: string) => {
     try {
       const issues = await props.checkHealth(tool, service, modeOf(tool));
@@ -424,24 +420,9 @@ export function Launcher(props: {
       reportHealth(tool, issues);
     }
   }, [health, streaming]);
-  /** 提示符里回车：交给 AI 诊断，结果写进输出 */
-  const askAi = async (tool: ToolId, mode: LaunchMode, note: string) => {
-    const c = ctxFor(tool);
-    if (!c.aiProfile || thinking) return;
-    const group = `ai-${tool}`, batch = props.nextBatch();
-    props.log("cmd", `${t("让 AI 帮你看看")} · ${TOOLS[tool].name}${note ? `${t("：")}${note.length > 60 ? note.slice(0, 60) + "…" : note}` : ""}`, { group, batch });
-    setThinking(tool);
-    try {
-      const d = await props.diagnose(tool, mode, c.service, c.aiProfile, note);
-      const action = fixAction(tool, d.action, { verifyAfterWrite: true });
-      props.log("ai", d.cause, { group, batch, actions: action ? [action] : [] });
-      d.steps.forEach((step, i) => props.log("path", `${i + 1}. ${step}`));
-      props.log("info", t("以上由 AI 生成，仅供参考"));
-    } catch (e) {
-      props.log("err", String(e).replace(/^Error:\s*/, "") || t("AI 暂时看不了，稍后重试"));
-    } finally {
-      setThinking(null);
-    }
+  const copyDiagnostics = async (tool: ToolId, mode: LaunchMode, issues: HealthIssue[] | null | undefined) => {
+    if (!consented(tool) || !issues) throw new Error("Diagnostics are not ready");
+    await writeText(diagnosticReport(tool, mode, props.env, issues, t));
   };
 
   /** 一个工具的完整页面：顶部启动区，下面依次是服务、模型（选了 AI 密钥时）、工作目录（仅 CLI），再下面是输出面板 */
@@ -456,7 +437,7 @@ export function Launcher(props: {
     // 桌面版 +「保持现有配置」只是打开程序，不读不写；其余组合都要经过配置检查与写入（已是当前配置时会跳过写入）
     const passthrough = mode === "desktop" && service === "current";
     const broken = !passthrough && config?.configurationStatus === "broken";
-    const { selected, aiProfile } = ctxFor(tool);
+    const { selected } = ctxFor(tool);
     // 当前配置对不上列表时，「保持现有配置」到底是什么：把检测到的状态翻译成一句人话
     const currentText = !config ? t("配置状态读取中") : t(({
       configured: "AI 密钥",
@@ -497,15 +478,6 @@ export function Launcher(props: {
         text: `${meta.name} · ${issues.length ? t("{n} 个问题", { n: issues.length }) : t("未发现问题")}`,
         title: t("再列一遍当前的体检结果"), onClick: () => reportHealth(tool, issues),
       };
-    // 密钥无效或连不上时，AI 也调不通，先把这两项修好
-    const blocked = !!issues?.some(i => i.id === "K1" || i.id === "K2");
-    const prompt: ConsolePrompt = {
-      enabled: consented(tool) && !!aiProfile && !blocked && !thinking,
-      busy: thinking === tool,
-      placeholder: t(!consented(tool) ? "先读取本机配置，才能让 AI 帮你看看" : !aiProfile ? "AI 诊断需要 AI Key，请选择或导入一把 AI Key" : blocked ? "先处理上面的密钥或网络问题，才能让 AI 帮你看看" : "遇到报错？粘贴到这里，回车让 AI 帮你看看"),
-      onSubmit: note => void askAi(tool, mode, note),
-      unlock: consented(tool) && !aiProfile ? { label: t("选择或导入 AI Key"), run: props.onLoginImport } : undefined,
-    };
     const checking = streaming || refreshing || !scan || issues === null;
 
     // 启动卡片只展示配置与操作，状态摘要统一放在下方活动记录。
@@ -575,8 +547,8 @@ export function Launcher(props: {
         </>}
       </section>
 
-      {/* 输出面板：标签栏右侧是这个工具的体检状态，最后一行的提示符可以直接贴报错让 AI 看 */}
-      <OutputConsole lines={props.logs} busy={disabled} onClear={props.onClearLogs} dropped={props.droppedLogs} status={status} prompt={prompt} />
+      {/* 输出面板：保留体检、修复操作，并提供不含原始日志的诊断摘要。 */}
+      <OutputConsole lines={props.logs} busy={disabled} onClear={props.onClearLogs} dropped={props.droppedLogs} status={status} copyEnabled={consented(tool) && !checking && Array.isArray(issues)} onCopy={() => copyDiagnostics(tool, mode, issues)} />
 
       {picker === "service" && <PickerDialog title={t("{tool} 使用的服务", { tool: meta.name })} onClose={() => setPicker(null)}
         footer={<button className="site" disabled={disabled} onClick={() => { setPicker(null); props.onKeys(tool); }}>{t("管理密钥 →")}</button>}>

@@ -17,8 +17,6 @@ import type {
   LaunchRequest,
   HealthIssue,
   HealthRequest,
-  DiagnoseRequest,
-  Diagnosis,
   AdoptResult,
   ToolId,
   KeyStatus,
@@ -140,8 +138,6 @@ export const envOverrides = (): Promise<string[]> =>
 export const adoptCurrentKey = (tool: ToolId, baseUrl: string, ignoreProxy: boolean): Promise<AdoptResult> =>
   DEV && S ? mock.mockAdopt(S, tool) : invoke<AdoptResult>("adopt_current_key", { req: { tool, baseUrl, ignoreProxy } });
 
-export const aiDiagnose = (req: DiagnoseRequest): Promise<Diagnosis> =>
-  DEV && S ? mock.mockDiagnose(S, req) : invoke<Diagnosis>("ai_diagnose", { req });
 
 export const rebuildMinimalConfig = (req: ApplyRequest): Promise<ApplyResult> =>
   DEV && S

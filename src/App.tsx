@@ -23,7 +23,7 @@ import { MAX_LOG_LINES, clipLogText, type LogAction, type LogKind, type LogLine 
 import { effortLabel, pickModel } from "./modelFamilies";
 import { launchWithConfiguration } from "./launchFlow";
 import { profileServiceUrl, serviceUrlFields } from "./serviceUrl";
-import { getLang, t, useLang } from "./i18n";
+import { t, useLang } from "./i18n";
 import "./App.css";
 import "./Launcher.css";
 import "./LiquidGlass.css";
@@ -488,11 +488,6 @@ export default function App() {
     const model = p ? modelFor(tool, p) : "";
     return api.healthCheck({ tool, mode, service, model, baseUrl: baseUrl || remote?.base_url || BRAND.apiBaseUrl, ignoreProxy, opusModel: aliasOpus, sonnetModel: aliasSonnet, haikuModel: aliasHaiku });
   };
-  const diagnose = (tool: ToolId, mode: LaunchMode, service: string, profileId: string, note: string) => {
-    const p = profiles.find(x => x.id === service);
-    const model = p ? modelFor(tool, p) : "";
-    return api.aiDiagnose({ tool, mode, service, model, profileId, note, lang: getLang(), baseUrl: baseUrl || remote?.base_url || BRAND.apiBaseUrl, ignoreProxy, opusModel: aliasOpus, sonnetModel: aliasSonnet, haikuModel: aliasHaiku });
-  };
   const fixHealth = async (tool: ToolId, profileId: string | null, fix: "rewrite" | "rebuild" | "keys" | "settings", mode: LaunchMode = "cli"): Promise<boolean> => {
     if (fix === "rebuild" && tool !== "codex") {
       setToast({ kind: "err", text: t("重建配置仅支持 Codex") });
@@ -606,7 +601,7 @@ export default function App() {
       <Launcher page={page} busy={busy !== null} profiles={profiles} env={env}
         onLaunch={launch} onKeys={() => setPage("keys")}
         onSettings={() => setPage("settings")} onAdvanced={() => setShowAdvanced(true)}
-        onRefresh={async () => { await reload(baseUrl); }} checkHealth={checkHealth} onFix={fixHealth} diagnose={diagnose} onAlerts={setToolAlerts} onConsole={openSite}
+        onRefresh={async () => { await reload(baseUrl); }} checkHealth={checkHealth} onFix={fixHealth} onAlerts={setToolAlerts} onConsole={openSite}
         modelFor={modelFor} catalogKey={Object.keys(catalogs).join()} onSaveModel={saveModel} listModels={listModels}
         logs={logs} log={log} nextBatch={nextBatch} onClearLogs={clearLogs} droppedLogs={droppedLogs} onPage={setPage} onAdopt={adoptKey}
         onLoginImport={() => { setPage("keys"); setShowLogin(true); }} onManualKey={() => { setPage("keys"); startEdit(); }}

@@ -189,7 +189,7 @@ button.primary:disabled, .launcher-pages button.primary:disabled, .key-actions >
 
 .console { border-radius: 24px; border-color: rgba(255,255,255,.75); background: rgba(255,255,255,.72); box-shadow: var(--material-edge), 0 4px 18px rgba(47,69,108,.05); }
 .console-bar { background: rgba(245,249,255,.55); border-bottom-color: rgba(77,99,130,.08); padding: 10px 14px; }
-.console-prompt { background: rgba(255,255,255,.45); border-top-color: rgba(77,99,130,.08); }
+.console-export { background: rgba(255,255,255,.45); border-top-color: rgba(77,99,130,.08); }
 .workspace-main .console-status { background: rgba(255,255,255,.65); border-color: rgba(77,99,130,.1); }
 .workspace-main .console-toggle { color: #005fca; }
 .setting-row { padding: 17px 18px; }

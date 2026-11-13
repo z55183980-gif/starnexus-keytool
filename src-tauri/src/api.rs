@@ -25,10 +25,6 @@ pub struct RemoteConfig {
     pub notice: String,
     #[serde(default)]
     pub write_mode: String,
-    /// AI 诊断用的模型：默认网关上的 DeepSeek（走 Chat Completions）。
-    /// 这把密钥用不了时，先找任一 DeepSeek 模型，再退到 haiku / sonnet
-    #[serde(default)]
-    pub diagnose_model: String,
 }
 
 /// 拉不到远程配置时的兜底 —— 绝不能因为拉不到就罢工
@@ -49,7 +45,6 @@ pub fn builtin_defaults() -> RemoteConfig {
         min_client_version: String::new(),
         notice: String::new(),
         write_mode: "provider_table".into(),
-        diagnose_model: "deepseek-chat".into(),
     }
 }
 

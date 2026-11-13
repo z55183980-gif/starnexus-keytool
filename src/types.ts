@@ -200,15 +200,12 @@ export type HealthFix = "rewrite" | "rebuild" | "keys" | "settings" | "model" | 
 export interface HealthIssue { id: string; level: "error" | "warn"; text: string; fix: HealthFix }
 /** mode：Claude 桌面版与 CLI 读两份配置，体检按启动方式分开查 */
 export interface HealthRequest { tool: ToolId; service: string; model: string; baseUrl: string; ignoreProxy: boolean; opusModel: string; sonnetModel: string; haikuModel: string; mode: LaunchMode }
-/** AI 诊断：一次请求一张卡片；action 只是推荐已有的按钮 */
-export interface DiagnoseRequest extends HealthRequest { profileId: string; note: string; /** 界面语言，AI 按它回答 */ lang: string }
 /** 把配置文件里正在用的 AI 密钥收进密钥列表的结果 */
 export interface AdoptResult { id: string; name: string; existed: boolean }
 
 /** 网关目录里的模型和它支持的接口（responses / messages / chat.completions…）；endpoints 为空 = 未知 */
 export interface ModelInfo { id: string; endpoints: string[] }
 
-export interface Diagnosis { cause: string; steps: string[]; action: HealthFix }
 
 export function isBroken(s: ConfigState | SettingsState): s is { broken: string } {
   return typeof s === "object" && s !== null && "broken" in s;

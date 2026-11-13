@@ -3,12 +3,12 @@ import { t } from "./i18n";
 
 /**
  * 输出面板：仿 PowerShell 的深色终端，按时间顺序记录每一次操作的结果。
- * - 保存、写入配置、启动、体检、AI 诊断都写在这里，可以回看。
+ * - 保存、写入配置、启动、体检都写在这里，可以回看。
  * - 行尾可以挂按钮（撤销、修复、换模型……）。同一组（group）里只有最新一批（batch）的按钮可点，
  *   避免点到已经过时的那条。
- * - 标签栏右侧是当前工具的体检状态；最后一行的提示符就是输入框：贴报错、回车交给 AI 诊断。
+ * - 标签栏右侧是当前工具的体检状态；可以复制脱敏后的体检摘要。
  */
-export type LogKind = "cmd" | "ok" | "err" | "warn" | "info" | "ai" | "path";
+export type LogKind = "cmd" | "ok" | "err" | "warn" | "info" | "path";
 export interface LogAction {
   label: string;
   run: () => void;
@@ -28,22 +28,13 @@ export interface ConsoleStatus {
   title?: string;
   onClick?: () => void;
 }
-export interface ConsolePrompt {
-  enabled: boolean;
-  placeholder: string;
-  busy: boolean;
-  onSubmit: (text: string) => void;
-  /** 不能用时提示行末尾的按钮（比如「登录 AI」） */
-  unlock?: { label: string; run: () => void };
-}
-
 /** 输出最多保留多少行：超出后丢掉最早的，避免长时间运行无限累积 */
 export const MAX_LOG_LINES = 200;
 /** 单行最多多少字：报错原文、路径之类偶尔很长，超出部分截掉 */
 export const MAX_LOG_TEXT = 500;
 export const clipLogText = (text: string) => text.length > MAX_LOG_TEXT ? text.slice(0, MAX_LOG_TEXT) + t("…（已截断）") : text;
 
-const MARK: Record<LogKind, string> = { cmd: ">", ok: "✓", err: "✗", warn: "!", info: "·", ai: "◆", path: " " };
+const MARK: Record<LogKind, string> = { cmd: ">", ok: "✓", err: "✗", warn: "!", info: "·", path: " " };
 
 export function OutputConsole(props: {
   lines: LogLine[];
@@ -52,12 +43,21 @@ export function OutputConsole(props: {
   /** 因为超出上限被丢掉的更早记录条数 */
   dropped?: number;
   status?: ConsoleStatus;
-  prompt?: ConsolePrompt;
+  copyEnabled?: boolean;
+  onCopy?: () => Promise<void>;
 }) {
   const bodyRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
-  const [text, setText] = useState("");
   const [expanded, setExpanded] = useState(false);
+  const [copying, setCopying] = useState(false);
+  const [copyStatus, setCopyStatus] = useState("");
+  useEffect(() => setCopyStatus(""), [props.lines, props.copyEnabled]);
+  const copy = async () => {
+    if (!props.copyEnabled || !props.onCopy || copying) return;
+    setCopying(true); setCopyStatus("");
+    try { await props.onCopy(); setCopyStatus(t("已复制脱敏诊断信息")); }
+    catch { setCopyStatus(t("复制失败，请重试")); }
+    finally { setCopying(false); }
+  };
   const errorLines = props.lines.filter(l => l.kind === "err");
   const latestErrorId = errorLines[errorLines.length - 1]?.id;
   useEffect(() => { if (latestErrorId !== undefined) setExpanded(true); }, [latestErrorId]);
@@ -70,7 +70,7 @@ export function OutputConsole(props: {
     if (!el) return;
     el.scrollTop = el.scrollHeight;
     atBottom.current = true;
-  }, [lastId, props.prompt?.busy]);
+  }, [lastId]);
   // 终端高度会随窗口变化（工具页里撑满剩余空间）：停在底部时继续贴着最新一行
   useEffect(() => {
     const el = bodyRef.current;
@@ -84,13 +84,6 @@ export function OutputConsole(props: {
   const latest = new Map<string, number>();
   for (const l of props.lines) if (l.group && l.batch !== undefined) latest.set(l.group, Math.max(latest.get(l.group) ?? 0, l.batch));
   const live = (l: LogLine) => !l.group || l.batch === latest.get(l.group);
-
-  const prompt = props.prompt;
-  const submit = () => {
-    if (!prompt?.enabled || prompt.busy) return;
-    prompt.onSubmit(text.trim());
-    setText("");
-  };
 
   return (
     <section className={`console ${expanded ? "is-expanded" : "is-compact"}`} aria-label={t("输出")}>
@@ -106,10 +99,8 @@ export function OutputConsole(props: {
           <button type="button" className="console-btn console-toggle" aria-expanded={expanded} onClick={() => setExpanded(x => !x)}>{t(expanded ? "收起日志" : "展开日志")}</button>
         </span>
       </div>
-      {/* 点终端空白处，焦点回到输入行 */}
       <div className="console-body" ref={bodyRef}
-        onScroll={e => { const el = e.currentTarget; atBottom.current = el.scrollHeight - el.clientHeight - el.scrollTop < 24; }}
-        onMouseUp={() => { if (!window.getSelection()?.toString()) inputRef.current?.focus(); }}>
+        onScroll={e => { const el = e.currentTarget; atBottom.current = el.scrollHeight - el.clientHeight - el.scrollTop < 24; }}>
         <div role="log" aria-live="polite">
           {!!props.dropped && <div className="console-line info"><span className="console-mark" aria-hidden="true">{MARK.info}</span><span className="console-text">{t("已丢弃更早的 {n} 条记录（最多保留 {max} 条）", { n: props.dropped, max: MAX_LOG_LINES })}</span></div>}
           {props.lines.length === 0 && <div className="console-line info"><span className="console-mark" aria-hidden="true">{MARK.info}</span><span className="console-text">{t("就绪。保存、写入配置、启动和体检的结果会显示在这里。")}</span></div>}
@@ -125,16 +116,12 @@ export function OutputConsole(props: {
           ))}
         </div>
       </div>
-        <label className="console-prompt">
-          <span className="console-ps" aria-hidden="true">{t("问题诊断")}</span>
-          {prompt?.busy ? <span className="console-wait">{t("AI 正在帮你看…")}<span className="console-cursor" /></span>
-            : prompt?.enabled ? <input ref={inputRef} className="console-input" value={text} maxLength={500} spellCheck={false} autoComplete="off"
-                placeholder={prompt.placeholder} aria-label={t("把报错粘贴到这里，回车让 AI 帮你看看")}
-                onChange={e => setText(e.target.value)} onKeyDown={e => { if (e.key === "Enter") submit(); }} />
-            : <span className="console-wait">{prompt?.placeholder}{prompt?.unlock
-                ? <button type="button" className="console-btn console-action" disabled={props.busy} onClick={prompt.unlock.run}>{prompt.unlock.label}</button>
-                : <span className="console-cursor" />}</span>}
-        </label>
+      {props.onCopy && <div className="console-export">
+        <button type="button" className="console-btn" disabled={props.busy || !props.copyEnabled || copying}
+          title={t("仅复制体检摘要，不包含密钥、账号信息、本机路径或原始日志。")}
+          onClick={() => void copy()}>{t(copying ? "正在复制…" : "复制脱敏诊断信息")}</button>
+        <span role="status">{copyStatus}</span>
+      </div>}
     </section>
   );
 }

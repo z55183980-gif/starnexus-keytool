@@ -267,19 +267,6 @@ button:focus-visible, select:focus-visible, summary:focus-visible { outline: 2px
 .console-status.warn .console-dot { background: #e9a23b; box-shadow: 0 0 0 3px rgba(233, 162, 59, .18); }
 .console-status.error .console-dot { background: #e05252; box-shadow: 0 0 0 3px rgba(224, 82, 82, .16); }
 .console-status.error { color: #c43838; }
-.console-line.ai .console-mark, .console-line.ai .console-text { color: #7446d4; }
-.console-prompt { display: flex; align-items: baseline; gap: 8px; margin-top: 2px; color: #3a4560; cursor: text; }
-.console-ps { flex-shrink: 0; white-space: nowrap; }
-.console-wait { min-width: 0; color: #8b95ac; }
-.console-wait .console-cursor { margin-left: 4px; }
-/* 不能让 AI 看时，提示后面跟一颗按钮（比如「登录 AI」） */
-.workspace-main .console-wait .console-action { margin-left: 8px; vertical-align: baseline; }
-.workspace-main .console-input { flex: 1; min-width: 0; height: auto; padding: 0; font: inherit; color: #1c2233; caret-color: #3f66f0; background: transparent; border: 0; border-radius: 0; box-shadow: none; outline: none; }
-.workspace-main .console-input::placeholder { color: #a3acc0; }
-.console-cursor { display: inline-block; width: .6em; height: 1.05em; vertical-align: text-bottom; background: #3a4560; animation: console-blink 1.1s steps(1) infinite; }
-@keyframes console-blink { 50% { opacity: 0; } }
-@media (prefers-reduced-motion: reduce) { .console-cursor { animation: none; } }
-
 /* 密钥页与设置页跟随同一套材质 */
 .key-workspace { display: flex; flex-direction: column; gap: 14px; max-width: var(--page-w); margin: 0 auto; }
 .key-workspace .launch-heading { margin-bottom: 4px; }
@@ -442,11 +429,8 @@ body { background: radial-gradient(ellipse at 0 0, #e5eafa, transparent 48%), #f
 .workspace-main .console-toggle { padding: 4px 8px; font-size: 12px; color: #3458c9; background: transparent; border: 0; box-shadow: none; border-radius: 6px; }
 .workspace-main.fill .tool-page > .console .console-body, .console .console-body { flex: none; height: auto; min-height: 0; padding: 12px 14px; max-height: 124px; overflow: auto; font-size: 12px; }
 .workspace-main.fill .tool-page > .console.is-expanded .console-body, .console.is-expanded .console-body { max-height: 320px; }
-.console-prompt { align-items: center; padding: 12px 14px; margin: 0; border-top: 1px solid #edf0f5; font-size: 12px; background: #fbfcff; }
-.console-ps { color: #586982; font-family: inherit; font-weight: 600; }
-.workspace-main .console-input { font-family: inherit; font-size: 13px; padding: 4px 0; }
-.workspace-main .console-input:focus-visible { outline: 2px solid #7893ec; outline-offset: 3px; border-radius: 3px; }
-.workspace-main .console-input::placeholder, .console-wait { color: #68758c; }
+.console-export { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; padding: 10px 14px; border-top: 1px solid #edf0f5; font-size: 12px; background: #fbfcff; }
+.console-export [role="status"] { color: #4b6377; }
 .console-time { color: #6e7b91; }
 .workspace-footer, .workspace-main.fill > .workspace-footer { margin-top: 20px; opacity: 1; font-size: 12px; color: #68758b; }
 .setting-sub, .settings-note { font-size: 13px; }

@@ -1,6 +1,6 @@
 [package]
 name = "dbkey"
-version = "0.1.1"
+version = "0.1.2"
 description = "StarNexus Claude / Codex 密钥管理"
 authors = ["StarNexus"]
 edition = "2021"
@@ -23,6 +23,7 @@ sha2 = "0.10"
 getrandom = "0.2"
 tauri-plugin-opener = "2"
 tauri-plugin-dialog = "2.8"
+tauri-plugin-clipboard-manager = "2"
 base64 = "0.22"
 serde = { version = "1", features = ["derive"] }
 # preserve_order 是刚需：合并写 auth.json 时必须保住用户原有键的顺序

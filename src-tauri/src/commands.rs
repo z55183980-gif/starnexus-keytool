@@ -6,7 +6,7 @@ use crate::codex_config::{self, AuthMode, ProviderConfig};
 use crate::detect::{self, Environment};
 use crate::error::{AppError, Result};
 use crate::gateway::{self, SessionState};
-use crate::{api, backup, diagnose, health, paths, state};
+use crate::{api, backup, health, paths, state};
 use serde::{Deserialize, Serialize};
 use std::fs;
 
@@ -976,7 +976,7 @@ fn service_kind(service: &str) -> health::Service {
     }
 }
 
-/// 体检的全部规则。health_check 和 ai_diagnose 共用，保证 AI 看到的和卡片上显示的一致。
+/// 体检的全部规则。用于启动前检查和体检卡片，不调用模型。
 pub async fn run_health(req: &HealthRequest, cache: &HealthCache) -> Result<Vec<health::Issue>> {
     use health::{Service, Tool};
     let openai_base = req.base_url.trim_end_matches('/').to_string();
@@ -1182,139 +1182,4 @@ pub async fn adopt_current_key(req: AdoptRequest) -> Result<AdoptResult> {
         Some(&current.key),
     )?;
     Ok(AdoptResult { id: saved.id, name: saved.name, existed: false })
-}
-
-// ——————————— AI 诊断 ———————————
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct DiagnoseRequest {
-    #[serde(flatten)]
-    /// 启动方式 mode 也在 health 里（和体检共用）
-    pub health: HealthRequest,
-    /// 用哪把 AI 密钥调模型（前端只从 AI 密钥中选择）
-    pub profile_id: String,
-    /// 用户填的报错，可为空
-    #[serde(default)]
-    pub note: String,
-    /// 界面语言（zh-CN / zh-HK / en），模型按它回答
-    #[serde(default)]
-    pub lang: String,
-}
-
-/// 准备好、但还没发出去的一次诊断。拆成两步是为了能在发送前检查内容（见 examples/diagnose_probe.rs）。
-pub struct PreparedDiagnosis {
-    pub model: String,
-    pub user_message: String,
-    openai_base: String,
-    key: String,
-    ignore_proxy: bool,
-}
-
-impl PreparedDiagnosis {
-    /// 发送内容里是否出现了密钥原文（应当永远为 false）
-    pub fn leaks_key(&self) -> bool {
-        self.user_message.contains(&self.key)
-    }
-
-    pub async fn send(self) -> Result<diagnose::Diagnosis> {
-        diagnose::call(&self.openai_base, &self.key, &self.model, self.user_message, self.ignore_proxy).await
-    }
-}
-
-#[tauri::command]
-pub async fn ai_diagnose(
-    req: DiagnoseRequest,
-    cache: tauri::State<'_, HealthCache>,
-) -> Result<diagnose::Diagnosis> {
-    prepare_diagnosis(&req, &cache).await?.send().await
-}
-
-pub async fn prepare_diagnosis(req: &DiagnoseRequest, cache: &HealthCache) -> Result<PreparedDiagnosis> {
-    use health::Tool;
-    // AI 诊断只允许走 AI 网关。其他渠道的模型目录和接口协议不受本工具控制，
-    // 即使能连通也不能保证使用配置中的诊断模型；在任何体检或网络请求前直接拒绝。
-    let payer = state::find_profile(&req.profile_id)?
-        .ok_or_else(|| AppError::Other("AI 诊断需要 AI Key，请选择或导入一把 AI Key".into()))?;
-    if payer.is_custom() {
-        return Err(AppError::Other("AI 诊断需要 AI Key，请选择或导入一把 AI Key".into()));
-    }
-    let key = state::load_profile_key(&req.profile_id)?
-        .ok_or_else(|| AppError::Other("AI 诊断需要 AI Key，请选择或导入一把 AI Key".into()))?;
-
-    let issues = run_health(&req.health, cache).await?;
-    // 诊断用的是 profile_id 那把 AI 密钥。被体检的正是它、而它连不上或无效时，诊断也发不出去；
-    // 被体检的是别的服务时（比如其他服务的密钥坏了），正是该让 AI 看看的时候
-    if req.health.service == req.profile_id && issues.iter().any(|i| i.id == "K1" || i.id == "K2") {
-        return Err(AppError::Other("先处理密钥或网络问题，才能让 AI 帮你看看".into()));
-    }
-    let openai_base = req.health.base_url.trim_end_matches('/').to_string();
-    let home = dirs::home_dir().map(|h| h.to_string_lossy().to_string());
-    let home = home.as_deref();
-
-    let mut files = serde_json::Map::new();
-    let mut auth_fields = Vec::new();
-    let (tool_name, env_vars) = match req.health.tool {
-        Tool::Claude => {
-            if let Some(t) = read_text_optional(&paths::claude_settings_path()?)? {
-                files.insert("settings.json".into(), diagnose::redact_claude_settings(&t, home).into());
-            }
-            ("claude", health::CLAUDE_ENV_VARS)
-        }
-        Tool::Codex => {
-            if let Some(t) = read_text_optional(&paths::config_path()?)? {
-                files.insert("config.toml".into(), diagnose::redact_codex_config(&t, home).into());
-            }
-            auth_fields = diagnose::auth_fields(read_text_optional(&paths::auth_path()?)?.as_deref());
-            ("codex", health::CODEX_ENV_VARS)
-        }
-    };
-    // 扫描结果本身不含密钥值，但含路径，统一在 user_message 里再脱敏一遍
-    let scan = detect::scan(PROVIDER_ID, &openai_base)
-        .ok()
-        .and_then(|env| match req.health.tool {
-            Tool::Claude => serde_json::to_value(env.claude).ok(),
-            Tool::Codex => serde_json::to_value(env.codex).ok(),
-        })
-        .unwrap_or(serde_json::Value::Null);
-
-    let service = match service_kind(&req.health.service) {
-        health::Service::Current => "current",
-        health::Service::Official => "official",
-        health::Service::Ai => "ai",
-    };
-    let ctx = diagnose::Context {
-        tool: tool_name,
-        mode: &req.health.mode,
-        service,
-        issues: &issues,
-        scan,
-        files,
-        auth_fields,
-        env_vars_set: env_vars.iter().copied().filter(|v| env_is_set(v)).collect(),
-        note: &req.note,
-        lang: &req.lang,
-    };
-    let user = diagnose::user_message(&ctx, home);
-
-    let defaults = api::builtin_defaults();
-    let available = match connection_for(&key, &openai_base, req.health.ignore_proxy, cache).await {
-        health::Connection::Ok(models) => models,
-        _ => Vec::new(),
-    };
-    let configured_model = defaults.diagnose_model.trim();
-    let model = diagnose::pick_model(configured_model, &available).ok_or_else(|| {
-        AppError::Other(format!(
-            "配置的诊断模型 {} 不在这把密钥的可用模型列表中，请更新诊断模型配置或更换密钥",
-            if configured_model.is_empty() { "（未设置）" } else { configured_model }
-        ))
-    })?;
-
-    Ok(PreparedDiagnosis {
-        model,
-        user_message: user,
-        openai_base,
-        key,
-        ignore_proxy: req.health.ignore_proxy,
-    })
 }

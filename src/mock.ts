@@ -25,8 +25,6 @@ import type {
   TestResult,
   HealthIssue,
   HealthRequest,
-  DiagnoseRequest,
-  Diagnosis,
   ModelInfo,
 } from "./types";
 
@@ -357,20 +355,4 @@ export function mockHealth(s: Scenario, req: HealthRequest): HealthIssue[] {
        { id: "E1", level: "warn", text: "系统环境变量会覆盖这里的配置", fix: "none" }]
     : [{ id: "K2", level: "error", text: "连不上服务器", fix: "settings" }];
   return [];
-}
-
-/** AI 诊断假数据：等 1.2 秒再返回；报错里写「失败」可以预览失败提示 */
-export async function mockDiagnose(s: Scenario, req: DiagnoseRequest): Promise<Diagnosis> {
-  await new Promise(r => setTimeout(r, 1200));
-  if (req.note.includes("失败")) throw new Error("AI 暂时看不了，稍后重试");
-  if (s === "legacy" && req.tool === "claude") return {
-    cause: "模型别名没写齐，切换到 opus 时请求了网关上不存在的模型",
-    steps: ["点「修复」重新写入配置", "重新打开 Claude Code", "再执行 /model opus 试试"],
-    action: "rewrite",
-  };
-  return {
-    cause: "配置正常，可能是桌面版里的官方登录优先生效",
-    steps: ["在桌面版里退出官方账号", "重新打开应用后再试"],
-    action: "none",
-  };
 }

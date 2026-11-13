@@ -9,7 +9,6 @@ pub mod codex_auth;
 pub mod codex_config;
 pub mod commands;
 pub mod detect;
-pub mod diagnose;
 pub mod error;
 pub mod gateway;
 pub mod health;
@@ -155,6 +154,7 @@ pub fn run() {
     }));
     builder
         .plugin(tauri_plugin_deep_link::init())
+        .plugin(tauri_plugin_clipboard_manager::init())
         .manage(browser_login::BrowserLogin::default())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
@@ -221,7 +221,6 @@ pub fn run() {
             commands::set_ui_language,
             commands::mark_config_read,
             commands::adopt_current_key,
-            commands::ai_diagnose,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
