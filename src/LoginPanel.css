@@ -1,0 +1,60 @@
+.account-dialog {
+  --ink: #1a1915; --ink-soft: #66645c; --ink-faint: #8f8c82;
+  --line: #e7e3d8; --line-strong: #d6d1c3; --page: #fdfcf8; --surface: #f3f1e9; --link: #2a5bd7;
+  width: min(400px, calc(100vw - 32px)); max-width: none; max-height: calc(100dvh - 40px);
+  padding: 0; border: 1px solid var(--line); border-radius: 16px; color: var(--ink); background: var(--page);
+  box-shadow: 0 24px 70px -30px rgb(22 22 15 / .45); overflow: auto;
+}
+.account-dialog::backdrop { background: rgb(24 28 40 / .38); -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); }
+.cauth { position: relative; padding: 22px 24px 20px; }
+.cauth-close { position: absolute; top: 12px; right: 12px; display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 999px; background: transparent; color: var(--ink-faint); }
+.cauth-close:hover:not(:disabled) { background: var(--surface); color: var(--ink); }
+.cauth-close .ui-icon { width: 16px; height: 16px; }
+.cauth-heading-row { display: flex; align-items: center; gap: 10px; padding-right: 24px; }
+.cauth-logo { flex: none; width: 40px; height: auto; object-fit: contain; user-select: none; }
+.cauth-title { min-width: 0; margin: 0; font-size: 20px; font-weight: 600; line-height: 1.35; }
+.cauth-lede { max-width: 340px; margin: 7px 0 0; font-size: 12.5px; line-height: 18px; color: var(--ink-soft); }
+.cauth-body { display: flex; flex-direction: column; margin-top: 14px; }
+.cauth-waiting { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 6px 8px 2px; text-align: center; }
+.cauth-waiting .account-spinner { width: 22px; height: 22px; border-color: var(--line-strong); border-top-color: var(--ink); }
+.cauth-waiting strong { font-size: 15px; }
+.cauth-waiting p { margin: 0; font-size: 12px; line-height: 1.7; color: var(--ink-soft); }
+.cauth-submit { display: flex; align-items: center; justify-content: center; gap: 9px; width: 100%; min-height: 44px; margin-top: 12px; padding: 0 16px; border: 0; border-radius: 10px; background: var(--ink); color: #fff; font-size: 14px; font-weight: 600; }
+.cauth-submit:hover:not(:disabled) { background: #33312a; border-color: transparent; }
+.cauth-submit:disabled { opacity: .5; }
+.cauth-error { margin: 0; padding: 9px 12px; border-radius: 10px; color: #a32f2a; background: #fdf0ee; border: 1px solid #f3d3ce; font-size: 13px; overflow-wrap: anywhere; }
+.cauth-body > .cauth-error { margin-top: 12px; }
+.cauth-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 14px; }
+.cauth-foot { margin: 16px 0 0; text-align: center; }
+.cauth-link { display: inline; padding: 0; border: 0; border-radius: 4px; background: none; color: var(--link); font-size: 12px; white-space: normal; }
+.cauth-link:hover:not(:disabled) { text-decoration: underline; border-color: transparent; }
+.cauth-row .cauth-link { font-size: 13px; }
+.cauth-trust { display: flex; align-items: center; justify-content: center; gap: 5px; margin: 16px 0 0; padding-top: 13px; border-top: 1px solid var(--line); font-size: 11px; color: #6f6d65; }
+.cauth-trust .ui-icon { width: 13px; height: 13px; }
+
+/* 第二步：选择要导入的密钥 */
+.account-identity { display: flex; gap: 10px; align-items: center; padding: 10px 12px; border-radius: 10px; background: var(--surface); margin-bottom: 18px; }
+.account-avatar { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 999px; background: var(--ink); color: #fff; font-size: 13px; font-weight: 600; flex-shrink: 0; }
+.account-identity > div { min-width: 0; flex: 1; }
+.account-identity strong { display: block; font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
+.account-identity div > span { display: block; font-size: 11px; color: var(--ink-faint); }
+.account-list-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; font-size: 12px; color: var(--ink-soft); }
+.account-token-list { display: flex; flex-direction: column; gap: 8px; max-height: min(320px, 44dvh); overflow-y: auto; }
+.account-token { display: flex; align-items: center; gap: 11px; padding: 11px 12px; border: 1px solid var(--line-strong); border-radius: 10px; flex-shrink: 0; }
+label.account-token { cursor: pointer; }
+.account-token.selected { border-color: var(--ink); background: #fffefb; }
+.account-token.unavailable { opacity: .55; cursor: default; }
+.account-token > input { width: 16px; height: 16px; accent-color: var(--ink); flex-shrink: 0; }
+.account-token > div { flex: 1; min-width: 0; }
+.account-token strong { display: block; font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
+.account-token div > span { display: block; font-size: 11px; color: var(--ink-faint); overflow-wrap: anywhere; }
+.account-token.linked > .ui-icon { color: #1d7f58; }
+.account-empty { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 22px 12px; color: var(--ink-faint); text-align: center; }
+.account-empty strong { color: var(--ink-soft); font-size: 14px; }
+.account-empty p { margin: 0; font-size: 12px; }
+.account-spinner { width: 14px; height: 14px; border-radius: 50%; border: 2px solid #ffffff55; border-top-color: currentColor; animation: account-spin .8s linear infinite; }
+@keyframes account-spin { to { transform: rotate(360deg); } }
+@media(prefers-reduced-motion: reduce) { .account-spinner { animation: none; } }
+
+.cauth-field { display: grid; gap: 6px; margin-top: 12px; font-size: 13px; }
+.cauth-field input { width: 100%; min-height: 40px; padding: 9px 12px; border: 1px solid var(--line-strong); border-radius: 8px; background: white; color: var(--ink); }

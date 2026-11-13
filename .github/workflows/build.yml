@@ -1,0 +1,47 @@
+name: StarNexus installers
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  macos:
+    runs-on: macos-15-intel
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - run: npm ci
+      - run: npm test
+      - run: cargo test --manifest-path src-tauri/Cargo.toml --all-targets
+      - name: Build universal macOS installer
+        run: npm run tauri build -- --target universal-apple-darwin --bundles app,dmg
+      - name: Collect and verify
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          B=src-tauri/target/universal-apple-darwin/release/bundle
+          APP="$B/macos/StarNexus Key Tool.app"
+          test -d "$APP"
+          /usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$APP/Contents/Info.plist" | grep -Fx 'com.dkby.starnexus.keytool'
+          lipo -info "$APP/Contents/MacOS/starnexus-keytool"
+          ditto -c -k --sequesterRsrc --keepParent "$APP" artifacts/StarNexus-Key-Tool_macOS_universal.zip
+          cp "$B"/dmg/*.dmg artifacts/StarNexus-Key-Tool_macOS_universal.dmg
+          cd artifacts
+          shasum -a 256 * > SHA256SUMS-macOS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: StarNexus-macOS
+          path: artifacts/*
+          retention-days: 30

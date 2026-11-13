@@ -1,0 +1,280 @@
+/* Material theme: regular glass for navigation/controls, quiet surfaces for content.
+   CSS approximation of Apple's material language; no platform-specific renderer. */
+body {
+  --accent: #0066df;
+  --dim: #566377;
+  --glass: rgba(255, 255, 255, .52);
+  --glass-strong: rgba(255, 255, 255, .74);
+  --glass-edge: rgba(255, 255, 255, .86);
+  --material-surface: linear-gradient(155deg, rgba(255,255,255,.83), rgba(249,252,255,.65));
+  --material-control: linear-gradient(165deg, rgba(255,255,255,.78), rgba(245,250,255,.36));
+  --material-edge: inset 0 1px 0 rgba(255,255,255,.98), inset 1px 0 0 rgba(255,255,255,.58), inset 0 -1px 0 rgba(255,255,255,.55);
+  --material-shadow: var(--material-edge), 0 0 0 .5px rgba(48,70,108,.1), 0 8px 24px rgba(48,70,108,.09);
+  background:
+    radial-gradient(ellipse at 4% 5%, rgba(166,199,250,.55), transparent 52%),
+    radial-gradient(ellipse at 100% 48%, rgba(188,179,241,.3), transparent 52%),
+    radial-gradient(ellipse at 30% 100%, rgba(169,220,224,.42), transparent 50%),
+    #edf1f7;
+  color: #1b2535;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Reference: ai-admin-ios-release NativeTabsView uses the system TabView,
+   with a #007A66 tint. Approximate that restrained material in the web shell. */
+.workspace-nav { --nav-tint: #007a66; background: transparent; }
+.nav-pill.liquid-glass {
+  --nav-count: 5;
+  width: min(100%, 420px);
+  display: grid;
+  grid-template-columns: repeat(var(--nav-count), minmax(0, 1fr));
+  gap: 0;
+  padding: 4px;
+  border: 1px solid rgba(255,255,255,.48);
+  border-radius: 999px;
+  background: rgba(250,251,252,.52);
+  -webkit-backdrop-filter: blur(32px) saturate(145%);
+  backdrop-filter: blur(32px) saturate(145%);
+  box-shadow: 0 0 0 .5px rgba(35,46,58,.06), 0 4px 18px rgba(35,46,58,.1);
+}
+.nav-pill.liquid-glass::before { display: none; }
+.nav-pill .nav-lens {
+  top: 4px;
+  left: 4px;
+  width: calc((100% - 8px) / var(--nav-count));
+  height: 54px;
+  border-radius: 999px;
+  background: rgba(54,70,74,.085);
+  box-shadow: none;
+  transition: transform 420ms cubic-bezier(.22, 1.12, .36, 1);
+}
+.nav-tab {
+  width: 100%; height: 54px; padding: 5px 8px; gap: 3px;
+  border: 0; border-radius: 999px; color: #51565c; font-size: 10px; font-weight: 500;
+  letter-spacing: 0; transition: color 180ms;
+  -webkit-tap-highlight-color: transparent;
+}
+.nav-tab[aria-current="page"] { color: var(--nav-tint); font-weight: 600; background: transparent; border-color: transparent; box-shadow: none; }
+.nav-icon { width: 26px; height: 26px; transition: transform 180ms cubic-bezier(.2,.8,.2,1); }
+.nav-icon .ui-icon, .nav-icon .brand { width: 24px; height: 24px; color: inherit; }
+.nav-icon .ui-icon { stroke-width: 1.8; }
+.nav-tab[aria-current="page"] .brand-claude { color: #d97757; }
+.nav-tab[aria-current="page"] .brand-codex { color: #000; }
+.nav-tab[aria-current="page"] .ui-icon { color: #005bc5; }
+.nav-label { line-height: 1.2; }
+/* Only the shared lens moves on selection; hovering never draws another pill. */
+.nav-pill .nav-tab:hover:not(:disabled),
+.nav-pill .nav-tab:hover:not(:disabled):not([aria-current="page"]) {
+  border: 0; background: transparent; box-shadow: none;
+}
+.nav-pill .nav-tab:hover:not(:disabled):not([aria-current="page"]) { color: #51565c; }
+.nav-pill .nav-tab[aria-current="page"]:hover:not(:disabled) { color: var(--nav-tint); }
+.nav-pill .nav-tab:active:not(:disabled) { transform: none; }
+@media (hover: hover) and (pointer: fine) {
+  .nav-pill .nav-tab:hover:not(:disabled):not([aria-current="page"]) { color: #202b37; }
+  .nav-pill .nav-tab:hover:not(:disabled) .nav-icon { transform: translateY(-2px) scale(1.08); }
+  .nav-pill .nav-tab:active:not(:disabled) .nav-icon { transform: scale(.96); }
+}
+.nav-tab:focus:not(:focus-visible) { outline: none; }
+.nav-tab:focus-visible { outline: 2px solid var(--nav-tint); outline-offset: -3px; }
+.nav-badge { top: -2px; right: -7px; background: #626b73; box-shadow: 0 0 0 1.5px rgba(247,249,250,.9); }
+.workspace-brand { color: #526078; font-weight: 600; }
+.brand-row .brand-console { color: #365d92; }
+
+/* Quiet, rounded content surfaces retain clear text over the tinted backdrop. */
+.tool-hero, .onboard, .key-workspace .card, .settings-card {
+  border: 1px solid rgba(255,255,255,.8);
+  background: var(--material-surface);
+  -webkit-backdrop-filter: blur(20px);
+  backdrop-filter: blur(20px);
+  box-shadow: var(--material-edge), 0 4px 22px rgba(47,69,108,.07);
+  border-radius: 28px;
+}
+.tool-hero::before, .onboard::before, .key-workspace .card::before, .settings-card::before { background: none; }
+.tool-hero h1, .launch-heading h1 { letter-spacing: -.7px; font-weight: 700; }
+.launch-brand { border-radius: 17px; background: rgba(255,255,255,.7); box-shadow: var(--material-shadow); }
+.launch-brand.claude { background: linear-gradient(150deg, rgba(255,249,245,.9), rgba(247,220,205,.65)); }
+.launch-configuration { border-radius: 20px; border-color: rgba(102,124,157,.12); background: rgba(255,255,255,.46); }
+.launcher-pages .launch-configuration > button { min-height: 64px; padding: 12px 16px; }
+.launcher-pages .launch-configuration > button:hover:not(:disabled) { background: rgba(255,255,255,.65); }
+.launcher-pages .launch-configuration > button + button,
+.settings-card > .setting-row + .setting-row,
+.key-list > .key-row + .key-row { border-top-color: rgba(77,99,130,.1); }
+.config-label, .service-text small, .config-value .project-path { color: #56667c; }
+.readiness-card { border-radius: 20px; background: rgba(226,237,255,.64); border-color: rgba(125,158,203,.2); }
+.readiness-card.ok { background: rgba(226,245,237,.78); border-color: rgba(74,153,115,.15); }
+.readiness-card.error { background: rgba(255,233,230,.86); border-color: rgba(193,93,78,.2); }
+.readiness-card.warn { background: rgba(255,245,217,.88); border-color: rgba(171,134,54,.2); }
+.readiness-icon { border-radius: 11px; background: rgba(255,255,255,.7); }
+.health-card { border-radius: 16px; }
+.read-gate { border-radius: 22px; background: rgba(249,251,255,.38); border-color: rgba(107,137,180,.26); }
+
+/* Primary actions and segmented selections form the raised interaction layer. */
+.launcher-pages .launch-modes button[aria-pressed="true"] {
+  background: transparent !important;
+  box-shadow: none !important;
+  color: #007a66;
+}
+.tool-hero > .launch-modes, .lang-switch {
+  position: relative; isolation: isolate; width: 100%;
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0; padding: 4px;
+  background: rgba(250,251,252,.52); border: 1px solid rgba(255,255,255,.48);
+  -webkit-backdrop-filter: blur(24px) saturate(145%); backdrop-filter: blur(24px) saturate(145%);
+  box-shadow: 0 0 0 .5px rgba(35,46,58,.06), 0 3px 12px rgba(35,46,58,.07);
+}
+.lang-switch { grid-template-columns: repeat(3, minmax(0, 1fr)); width: min(100%, 330px); }
+.settings-page > .lang-switch { width: 100%; margin: 0; }
+.launch-mode-lens, .lang-lens {
+  position: absolute; top: 4px; bottom: 4px; left: 4px; z-index: 0;
+  width: calc((100% - 8px) / 2); border-radius: 999px; pointer-events: none;
+  background: rgba(54,70,74,.085);
+  transition: transform 420ms cubic-bezier(.22,1.12,.36,1);
+}
+.lang-lens { width: calc((100% - 8px) / 3); }
+.tool-hero > .launch-modes button { position: relative; z-index: 1; min-width: 0; min-height: 38px; -webkit-tap-highlight-color: transparent; }
+.launch-mode-tab .ui-icon { transition: transform 180ms ease; }
+.launch-mode-tab:focus:not(:focus-visible) { outline: none; }
+.launch-mode-tab:focus-visible { outline-offset: -3px; }
+@media (hover: hover) and (pointer: fine) {
+  .launcher-pages .launch-mode-tab:hover:not(:disabled) { border: 0; background: transparent !important; box-shadow: none !important; }
+  .launcher-pages .launch-mode-tab:hover:not(:disabled):not([aria-pressed="true"]) { color: #202b37; }
+  .launch-mode-tab:hover:not(:disabled) .ui-icon { transform: translateY(-1px) scale(1.08); }
+  .launch-mode-tab:active:not(:disabled) .ui-icon { transform: scale(.96); }
+}
+.launcher-pages .lang-switch button {
+  position: relative; z-index: 1; min-width: 0; min-height: 38px; padding: 6px 8px;
+  background: transparent; border: 0; box-shadow: none; -webkit-tap-highlight-color: transparent;
+}
+.launcher-pages .lang-switch button[aria-checked="true"] { color: #007a66; background: transparent; box-shadow: none; }
+.lang-tab:focus:not(:focus-visible) { outline: none; }
+.lang-tab:focus-visible { outline-offset: -3px; }
+@media (hover: hover) and (pointer: fine) {
+  .launcher-pages .lang-tab:hover:not(:disabled) { border: 0; background: transparent; box-shadow: none; }
+  .launcher-pages .lang-tab:hover:not(:disabled):not([aria-checked="true"]) { color: #202b37; }
+}
+.launcher-pages .icon-round, .picker-hd .icon-round {
+  background: var(--material-control);
+  border-color: rgba(255,255,255,.8);
+  box-shadow: var(--material-shadow);
+}
+button.primary, .launcher-pages button.primary, .key-actions > button.primary, .account-dialog .cauth-submit, .launcher-pages .tool-hero .launch-button {
+  --button-hover-bg: rgba(232,250,243,.96);
+  color: #075e50;
+  background: rgba(213,240,230,.9);
+  border: 1px solid transparent;
+  border-radius: 999px;
+  min-height: 44px;
+  font-weight: 650;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.95), inset 0 -1px 0 rgba(7,94,80,.07), 0 4px 12px rgba(7,94,80,.12);
+  transition: transform 180ms, background-color 180ms, box-shadow 180ms;
+}
+button.primary:hover:not(:disabled), .launcher-pages button.primary:hover:not(:disabled), .key-actions > button.primary:hover:not(:disabled), .account-dialog .cauth-submit:hover:not(:disabled) {
+  background: var(--button-hover-bg);
+  border-color: transparent;
+  filter: none;
+}
+.launcher-pages .tool-hero .launch-button {
+  min-height: 48px;
+}
+.launcher-pages .tool-hero .launch-button:hover:not(:disabled) {
+  background: var(--button-hover-bg);
+  border-color: transparent;
+  filter: none;
+}
+.launcher-pages .tool-hero .launch-button:disabled { box-shadow: none; }
+button.primary:active:not(:disabled), .account-dialog .cauth-submit:active:not(:disabled) { transform: scale(.985); }
+button.primary:disabled, .launcher-pages button.primary:disabled, .key-actions > button.primary:disabled, .account-dialog .cauth-submit:disabled { box-shadow: none; }
+.account-dialog .cauth-submit .account-spinner { border-color: rgba(27,37,53,.2); border-top-color: currentColor; }
+.read-gate .primary { border-radius: 999px; }
+
+.console { border-radius: 24px; border-color: rgba(255,255,255,.75); background: rgba(255,255,255,.72); box-shadow: var(--material-edge), 0 4px 18px rgba(47,69,108,.05); }
+.console-bar { background: rgba(245,249,255,.55); border-bottom-color: rgba(77,99,130,.08); padding: 10px 14px; }
+.console-prompt { background: rgba(255,255,255,.45); border-top-color: rgba(77,99,130,.08); }
+.workspace-main .console-status { background: rgba(255,255,255,.65); border-color: rgba(77,99,130,.1); }
+.workspace-main .console-toggle { color: #005fca; }
+.setting-row { padding: 17px 18px; }
+
+/* Sheets are more opaque than the dock to support dense lists and forms. */
+.picker-overlay { background: rgba(30,46,71,.18); -webkit-backdrop-filter: blur(9px); backdrop-filter: blur(9px); }
+.picker-sheet {
+  border-radius: 30px;
+  border-color: rgba(255,255,255,.85);
+  background: linear-gradient(155deg, rgba(255,255,255,.94), rgba(240,247,255,.87));
+  box-shadow: var(--material-edge), 0 24px 70px rgba(34,55,88,.23);
+}
+.picker-hd { padding: 18px 18px 10px 22px; }
+.picker-body { padding: 10px 18px 18px; }
+.key-editor .service-url-picker { display: flex; align-items: center; justify-content: space-between; gap: 14px; width: 100%; padding: 11px 14px; border-radius: 14px; text-align: left; }
+.service-url-picker .mono { min-width: 0; overflow-wrap: anywhere; font-size: 13px; color: #34445c; }
+.service-url-picker > span:last-child { flex-shrink: 0; color: var(--accent); font-size: 12px; }
+.picker-ft { padding: 14px 18px 18px; border-top-color: rgba(77,99,130,.1); }
+.picker-ft button:not(.site) { min-height: 44px; padding: 8px 20px; border-radius: 999px; }
+.picker-ft button.ghost:not(.danger-text) {
+  color: #34445c;
+  background: var(--glass-strong);
+  border-color: var(--glass-edge);
+  font-weight: 500;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.9), 0 2px 8px rgba(36,52,80,.06);
+}
+.picker-sheet input:not([type="checkbox"]):not([type="radio"]), .picker-sheet select { border-radius: 14px; background-color: rgba(255,255,255,.72); border-color: rgba(91,118,158,.23); }
+
+/* Shared pointer feedback for page and dialog actions; the dock has its own motion.
+   The interaction rules intentionally override older component hover borders. */
+:is(.launcher-app, .account-dialog) button:not(.nav-tab, .launch-mode-tab, .lang-tab) {
+  transition: translate 180ms ease, background-color 180ms ease, box-shadow 180ms ease, color 180ms ease;
+}
+:is(.launcher-app, .account-dialog) button:not(.nav-tab):focus:not(:focus-visible) { outline: none; }
+@media (hover: hover) and (pointer: fine) {
+  :is(.launcher-app, .account-dialog) button:not(.nav-tab, .launch-mode-tab, .lang-tab):hover:not(:disabled) {
+    translate: 0 -1px;
+    border-color: transparent !important;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.7), 0 3px 10px rgba(36,52,80,.07) !important;
+  }
+  :is(.launcher-app, .account-dialog) button:not(.nav-tab, .launch-mode-tab, .lang-tab):not(.danger):hover:not(:disabled) {
+    background: var(--button-hover-bg, rgba(255,255,255,.9)) !important;
+    filter: none;
+  }
+  /* Text links and list rows brighten without gaining a raised button container. */
+  :is(.launcher-app, .account-dialog) button:is(.site, .cauth-link, .console-clear, .console-action, .console-toggle, .setting-link, .service-option, .workdir-row, .model-option):hover:not(:disabled) {
+    translate: none;
+    box-shadow: none !important;
+  }
+  :is(.launcher-app, .account-dialog) button:not(.nav-tab, .launch-mode-tab, .lang-tab):active:not(:disabled) {
+    translate: none;
+    transform: none;
+    box-shadow: inset 0 1px 3px rgba(36,52,80,.06) !important;
+  }
+}
+
+@media (max-width: 720px) {
+  .tool-hero { border-radius: 26px; }
+}
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .nav-pill.liquid-glass, .picker-sheet { background: #f5f8fd; }
+  .tool-hero, .onboard, .key-workspace .card, .settings-card { background: #fafcff; }
+}
+@media (prefers-reduced-transparency: reduce) {
+  body { --material-control: #fff; --material-surface: #fafcff; --glass-strong: #fff; }
+  .nav-pill.liquid-glass, .picker-sheet, .console { background: #f8faff; }
+  .nav-pill.liquid-glass { background: #f4f5f6; }
+  .nav-pill .nav-lens, .launch-mode-lens, .lang-lens { background: #e0e5e4; }
+  .tool-hero > .launch-modes, .lang-switch { background: #f4f5f6; -webkit-backdrop-filter: none; backdrop-filter: none; }
+  .tool-hero, .onboard, .key-workspace .card, .settings-card, .nav-pill.liquid-glass, .picker-sheet, .picker-overlay { -webkit-backdrop-filter: none; backdrop-filter: none; }
+}
+@media (prefers-contrast: more) {
+  body { --dim: #34445c; }
+  .tool-hero, .onboard, .key-workspace .card, .settings-card, .nav-pill.liquid-glass, .picker-sheet, .console { background: #fff; border-color: #697d98; }
+  .nav-pill .nav-lens, .launch-mode-lens, .lang-lens { background: #e0efeb; box-shadow: inset 0 0 0 1px #007a66; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .launch-mode-lens, .lang-lens, .launch-mode-tab .ui-icon { transition: none; }
+  .launch-mode-tab:hover:not(:disabled) .ui-icon,
+  .launch-mode-tab:active:not(:disabled) .ui-icon { transform: none; }
+  :is(.launcher-app, .account-dialog) button:not(.nav-tab) { transition: none; }
+  :is(.launcher-app, .account-dialog) button:not(.nav-tab):hover:not(:disabled) { translate: none; }
+  .nav-icon { transition: none; }
+  .nav-pill .nav-tab:hover:not(:disabled) .nav-icon,
+  .nav-pill .nav-tab:active:not(:disabled) .nav-icon { transform: none; }
+  .nav-pill .nav-lens, .nav-tab, button.primary, .launcher-pages button.primary, .key-actions > button.primary, .account-dialog .cauth-submit { transition: none; }
+  .nav-tab:active:not(:disabled), button.primary:active:not(:disabled), .account-dialog .cauth-submit:active:not(:disabled) { transform: none; }
+}

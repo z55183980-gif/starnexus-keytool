@@ -1,0 +1,46 @@
+[package]
+name = "dbkey"
+version = "0.1.0"
+description = "StarNexus Claude / Codex 密钥管理"
+authors = ["StarNexus"]
+edition = "2021"
+
+[lib]
+name = "dbkey_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon"] }
+# 窗口收进托盘后再次双击图标，应唤回已有窗口而不是再开一个进程
+tauri-plugin-single-instance = "2"
+# 浏览器登录完成后，身份中心通过自定义协议把授权码交回本程序
+# PKCE：随机 verifier 与它的 SHA-256
+sha2 = "0.10"
+getrandom = "0.2"
+tauri-plugin-opener = "2"
+tauri-plugin-dialog = "2.8"
+base64 = "0.22"
+serde = { version = "1", features = ["derive"] }
+# preserve_order 是刚需：合并写 auth.json 时必须保住用户原有键的顺序
+serde_json = { version = "1", features = ["preserve_order"] }
+# 结构化改写 config.toml，保留用户注释与格式
+toml_edit = "0.22"
+# rustls 而非 native-tls：不依赖系统 OpenSSL，减少用户环境差异
+# cookies：登录态靠 session cookie 维持，只在内存里活到关窗口
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "charset", "http2", "cookies"] }
+tokio = { version = "1", features = ["time", "sync"] }
+thiserror = "2"
+chrono = "0.4"
+dirs = "5"
+keyring = { version = "3", features = ["windows-native", "apple-native"] }
+sys-locale = "0.3"
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = true
