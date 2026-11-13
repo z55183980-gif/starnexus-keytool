@@ -177,3 +177,11 @@ mod tests {
         assert!(unwrap(env).is_err());
     }
 }
+
+pub async fn finish_browser_login(s: &Session, code: &str, verifier: &str) -> Result<LoginResult> {
+    let _guard = s.requests.lock().await;
+    logout(s);
+    let response = s.client.post(format!("{}/api/desktop/exchange", brand::SITE))
+        .json(&serde_json::json!({"code":code,"code_verifier":verifier})).send().await.map_err(network)?;
+    adopt(s, decode(response).await?)
+}

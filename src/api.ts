@@ -152,3 +152,10 @@ export const revertToOfficial = (codex: boolean, claude: boolean, claudeDesktop 
   DEV && S
     ? Promise.resolve("20260918-183012")
     : invoke<string>("revert_to_official", { codex, claude, claudeDesktop });
+
+export const gatewayBrowserLoginStart = (ignoreProxy: boolean): Promise<string> =>
+  DEV && S ? Promise.resolve("https://dkby.com/desktop-login") : invoke("gateway_browser_login_start", { ignoreProxy });
+export const gatewayBrowserLoginFinish = (code: string, state: string, ignoreProxy: boolean): Promise<LoginResult> =>
+  DEV && S ? Promise.resolve({username:"demo",require2fa:false}) : invoke("gateway_browser_login_finish", { code, state, ignoreProxy });
+export const gatewayBrowserLoginCancel = (): Promise<void> =>
+  DEV && S ? Promise.resolve() : invoke("gateway_browser_login_cancel");

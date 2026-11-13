@@ -5,6 +5,10 @@
  * 带 {占位} 的条目也用来匹配后端返回的同款提示（见 i18n.ts 的模板匹配）。
  */
 export const DICT: Record<string, [string, string]> = {
+  "使用账号密码登录，或前往官网登录后自动返回并导入密钥。": ["使用帳戶密碼登入，或前往官網登入後自動返回並匯入密鑰。", "Sign in with your account and password, or sign in on the website to return and import keys automatically."],
+  "请在官网完成登录，成功后将自动返回工具。": ["請在官網完成登入，成功後將自動返回工具。", "Finish signing in on the website. You will return to this app automatically."],
+  "官网登录未完成，请重试": ["官網登入未完成，請重試", "Website sign-in was not completed. Please try again."],
+  "登录账号": ["登入帳戶", "Sign in"],
   "用户名或电子邮件": ["使用者名稱或電郵", "Username or email"],
   "StarNexus 密钥管理工具": ["StarNexus 密鑰管理工具", "StarNexus Key Tool"],
   "使用 StarNexus 账号登录并导入密钥，或前往官网登录后复制 API Key。": ["使用 StarNexus 帳戶登入並匯入密鑰，或前往官網登入後複製 API Key。", "Sign in with your StarNexus account to import keys, or copy an API key from the website."],

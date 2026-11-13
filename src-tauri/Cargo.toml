@@ -1,6 +1,6 @@
 [package]
 name = "dbkey"
-version = "0.1.0"
+version = "0.1.1"
 description = "StarNexus Claude / Codex 密钥管理"
 authors = ["StarNexus"]
 edition = "2021"
@@ -15,7 +15,8 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 tauri = { version = "2", features = ["tray-icon"] }
 # 窗口收进托盘后再次双击图标，应唤回已有窗口而不是再开一个进程
-tauri-plugin-single-instance = "2"
+tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
+tauri-plugin-deep-link = "2"
 # 浏览器登录完成后，身份中心通过自定义协议把授权码交回本程序
 # PKCE：随机 verifier 与它的 SHA-256
 sha2 = "0.10"

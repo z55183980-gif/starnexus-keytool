@@ -2,6 +2,7 @@ pub mod api;
 pub mod atomic;
 pub mod backup;
 pub mod brand;
+pub mod browser_login;
 pub mod claude_config;
 pub mod claude_desktop;
 pub mod codex_auth;
@@ -18,7 +19,7 @@ pub mod state;
 pub mod ui_lang;
 
 use std::sync::atomic::{AtomicBool, Ordering};
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 
 /// 托盘图标是否建成。建不成（例如 Linux 缺托盘支持）时关闭按钮照常退出，
 /// 否则窗口藏起来就再也找不回来了。
@@ -30,6 +31,49 @@ fn show_main(app: &tauri::AppHandle) {
         let _ = window.show();
         let _ = window.set_focus();
     }
+}
+
+#[derive(Clone, serde::Serialize)]
+struct BrowserLoginCallback {
+    code: String,
+    state: String,
+    error: String,
+}
+
+#[cfg(desktop)]
+fn watch_login_callback(app: &tauri::App) {
+    use tauri_plugin_deep_link::DeepLinkExt;
+
+    // 安装包会登记协议；开发时（以及 Linux 的免安装包）要在运行时登记一次。
+    #[cfg(any(target_os = "linux", windows))]
+    let _ = app.deep_link().register_all();
+
+    let handle = app.handle().clone();
+    app.deep_link().on_open_url(move |event| {
+        for url in event.urls() {
+            if url.scheme() != browser_login::SCHEME
+                || url.host_str() != Some("auth")
+                || url.path().trim_end_matches("/") != "/callback"
+            {
+                continue;
+            }
+            let param = |name: &str| {
+                url.query_pairs()
+                    .find(|(key, _)| key == name)
+                    .map(|(_, value)| value.into_owned())
+                    .unwrap_or_default()
+            };
+            show_main(&handle);
+            let _ = handle.emit(
+                "browser-login-callback",
+                BrowserLoginCallback {
+                    code: param("code"),
+                    state: param("state"),
+                    error: param("error"),
+                },
+            );
+        }
+    });
 }
 
 /// 托盘菜单项：切换语言时要改它们的文字
@@ -110,12 +154,16 @@ pub fn run() {
         show_main(app);
     }));
     builder
+        .plugin(tauri_plugin_deep_link::init())
+        .manage(browser_login::BrowserLogin::default())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .manage(gateway::SessionState::new())
         .manage(TrayReady(AtomicBool::new(false)))
         .manage(commands::HealthCache::default())
         .setup(|app| {
+            #[cfg(desktop)]
+            watch_login_callback(app);
             // 先定界面语言：保存过的选择优先，没有就跟随系统（认不出来用英文）
             ui_lang::init(&state::load().map(|s| s.ui_lang).unwrap_or_default());
             if let Some(window) = app.get_webview_window("main") {
@@ -146,6 +194,9 @@ pub fn run() {
             launcher::validate_launch,
             launcher::launch_client,
             commands::load_app_state,
+            browser_login::gateway_browser_login_start,
+            browser_login::gateway_browser_login_finish,
+            browser_login::gateway_browser_login_cancel,
             commands::gateway_login,
             commands::gateway_login_2fa,
             commands::gateway_logout,

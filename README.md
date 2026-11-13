@@ -6,13 +6,15 @@
 
 - 官网：https://dkby.com
 - 控制台：https://dkby.com/keys
-- 官网登录：https://dkby.com/sign-in
+- 官网登录：工具生成 https://dkby.com/desktop-login 授权请求；官网账号页仍为 https://dkby.com/sign-in
 - API：https://gateway.dkby.com/v1
 - Claude 根地址：https://gateway.dkby.com
 - 程序内账号登录：POST /api/user/login；两步验证：POST /api/user/login/2fa。
 - 密钥分页：GET /api/token/?p=1&page_size=100；完整密钥：POST /api/token/:id/key。
-- 不依赖其他项目的身份中心或授权回调。密码请求结束后清空，Cookie 会话仅保留在后端内存，密钥保存在系统凭据库。
-- 如账号使用第三方登录或网站开启人机验证，可通过官网登录并复制 API Key，再手动添加。浏览器登录不会自动把会话交给本程序。
+- 官网登录通过专属 com.dkby.starnexus.keytool 协议返回一次性授权码，使用 PKCE S256 + state 校验；两分钟过期且只能换取一次会话。网站会话只保留在工具后端内存，密钥保存在系统凭据库。
+- 工具内账号密码登录仍可用。标题和按钮统一为「登录账号」。
+- 第三方登录、两步验证和网站人机验证均在官网原有登录页面完成，成功后返回工具导入密钥。浏览器若未自动打开应用，点击官网授权页「返回密钥管理工具」。
+- Windows 安装包注册本产品自己的回调协议；Windows 免安装版也会在运行时为本用户注册该协议。
 
 ## 独立性
 

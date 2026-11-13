@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { BRAND } from "./brand";
+import { listen } from "@tauri-apps/api/event";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import * as api from "./api";
 import { UiIcon } from "./UiIcon";
@@ -11,10 +11,13 @@ import "./LoginPanel.css";
 
 async function openExternal(url: string) {
   try { await openUrl(url); }
-  catch { window.open(url, "_blank", "noopener,noreferrer"); }
+  catch (error) {
+    if (import.meta.env.DEV && window.open(url, "_blank", "noopener,noreferrer")) return;
+    throw error;
+  }
 }
 
-type Working = null | "login" | "list" | "import" | "logout";
+type Working = null | "login" | "list" | "import" | "logout" | "browser";
 
 export function LoginPanel(props: {
   loggedAs: string | null;
@@ -35,6 +38,7 @@ export function LoginPanel(props: {
   const [password, setPassword] = useState("");
   const [code, setCode] = useState("");
   const [require2fa, setRequire2fa] = useState(false);
+  const [browserWaiting, setBrowserWaiting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [authenticatedAs, setAuthenticatedAs] = useState<string | null>(null);
   const [picked, setPicked] = useState<Set<number>>(new Set());
@@ -75,6 +79,7 @@ export function LoginPanel(props: {
   }
 
   const doLogin = () => run("login", async () => {
+    await api.gatewayBrowserLoginCancel(); setBrowserWaiting(false);
     let result: api.LoginResult;
     try {
       result = require2fa ? await api.gatewayLogin2fa(code) : await api.gatewayLogin(username.trim(), password, ignoreProxy);
@@ -84,6 +89,30 @@ export function LoginPanel(props: {
     setAuthenticatedAs(result.username);
     await loadTokens(result.username);
   });
+  const startBrowserLogin = () => run("browser", async () => {
+    const url = await api.gatewayBrowserLoginStart(ignoreProxy);
+    try { await openExternal(url); setBrowserWaiting(true); }
+    catch (error) { await api.gatewayBrowserLoginCancel(); throw error; }
+  });
+  type Callback = {code: string; state: string; error: string};
+  const callback = useRef<(value: Callback) => void>(() => {});
+  callback.current = value => {
+    if (!browserWaiting) return;
+    void run("login", async () => {
+      if (value.error) throw new Error(t("官网登录未完成，请重试"));
+      const result = await api.gatewayBrowserLoginFinish(value.code, value.state, ignoreProxy);
+      setBrowserWaiting(false); setRequire2fa(false); setPassword(""); setCode("");
+      setAuthenticatedAs(result.username);
+      await loadTokens(result.username);
+    });
+  };
+  useEffect(() => {
+    let gone = false; let stop: (() => void) | undefined;
+    listen<Callback>("browser-login-callback", event => callback.current(event.payload))
+      .then(unlisten => { if(gone) unlisten(); else stop=unlisten; }).catch(() => {});
+    return () => { gone=true; stop?.(); void api.gatewayBrowserLoginCancel().catch(() => {}); };
+  }, []);
+
   const switchAccount = () => run("logout", async () => {
     await onLogout(); setAuthenticatedAs(null); setRequire2fa(false); setPassword(""); setCode("");
   });
@@ -93,8 +122,8 @@ export function LoginPanel(props: {
     await onImported(result.created, result.updated, result.unchanged, result.skipped);
   });
 
-  const title = t(signedIn ? "选择要导入的密钥" : "登录 AI 账号");
-  const lede = t(signedIn ? "导入后，即可在启动页和密钥页选择使用。" : "使用 StarNexus 账号登录并导入密钥，或前往官网登录后复制 API Key。");
+  const title = t(signedIn ? "选择要导入的密钥" : "登录账号");
+  const lede = t(signedIn ? "导入后，即可在启动页和密钥页选择使用。" : "使用账号密码登录，或前往官网登录后自动返回并导入密钥。");
   const alert = error && <p className="cauth-error" role="alert">{error}</p>;
   const spinner = <span className="account-spinner" />;
   const manual = <button type="button" className="cauth-link" disabled={disabled} onClick={onManualKey}>{t("手动粘贴 API Key")}</button>;
@@ -124,10 +153,11 @@ export function LoginPanel(props: {
             <label className="cauth-field">{t("用户名或电子邮件")}<input autoFocus autoComplete="username" value={username} onChange={event => setUsername(event.target.value)} disabled={disabled} required /></label>
             <label className="cauth-field">{t("密码")}<input type="password" autoComplete="current-password" value={password} onChange={event => setPassword(event.target.value)} disabled={disabled} required /></label>
           </>}
+          {browserWaiting && <p role="status">{t("请在官网完成登录，成功后将自动返回工具。")}</p>}
           {alert}
-          <button type="submit" className="cauth-submit primary" disabled={disabled}>{working === "login" ? <>{spinner}{t("正在登录…")}</> : t(require2fa ? "验证并登录" : "登录 AI 账号")}</button>
+          <button type="submit" className="cauth-submit primary" disabled={disabled}>{working === "login" ? <>{spinner}{t("正在登录…")}</> : t(require2fa ? "验证并登录" : "登录账号")}</button>
           {require2fa && <button type="button" className="cauth-link cauth-foot" disabled={disabled} onClick={() => setRequire2fa(false)}>{t("返回账号登录")}</button>}
-          <div className="cauth-row"><button type="button" className="cauth-link" disabled={disabled} onClick={() => void openExternal(BRAND.account)}>{t("前往官网登录")}</button>{manual}</div>
+          <div className="cauth-row"><button type="button" className="cauth-link" disabled={disabled} onClick={() => void startBrowserLogin()}>{t("前往官网登录")}</button>{manual}</div>
         </form>}
         {!signedIn && <p className="cauth-trust"><UiIcon name="shield"/>{t("仅连接 dkby.com，密码不保存，登录会话仅保留在内存中")}</p>}
       </div>
