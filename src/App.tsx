@@ -116,7 +116,7 @@ export default function App() {
   // 切换语言时整棵界面重新渲染；窗口标题也跟着换
   const lang = useLang();
   useEffect(() => {
-    document.title = "StarNexus " + t("密钥管理工具");
+    document.title = t("StarNexus 密钥管理工具");
     // 窗口标题、托盘菜单由后端按语言设置；预览环境里没有后端，忽略失败
     api.setUiLanguage(lang).catch(() => {});
   }, [lang]);

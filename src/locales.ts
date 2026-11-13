@@ -5,6 +5,8 @@
  * 带 {占位} 的条目也用来匹配后端返回的同款提示（见 i18n.ts 的模板匹配）。
  */
 export const DICT: Record<string, [string, string]> = {
+  "用户名或电子邮件": ["使用者名稱或電郵", "Username or email"],
+  "StarNexus 密钥管理工具": ["StarNexus 密鑰管理工具", "StarNexus Key Tool"],
   "使用 StarNexus 账号登录并导入密钥，或前往官网登录后复制 API Key。": ["使用 StarNexus 帳戶登入並匯入密鑰，或前往官網登入後複製 API Key。", "Sign in with your StarNexus account to import keys, or copy an API key from the website."],
   "验证码或备用码": ["驗證碼或備用碼", "Verification or recovery code"],
   "验证并登录": ["驗證並登入", "Verify and sign in"],
@@ -43,7 +45,7 @@ export const DICT: Record<string, [string, string]> = {
   "或": ["或", "or"],
 
   // —— 通用 ——
-  "密钥管理工具": ["StarNexus 密鑰管理工具", "StarNexus Key Tool"],
+  "密钥管理工具": ["密鑰管理工具", "Key Manager"],
   "主导航": ["主導覽", "Main navigation"],
   "密钥": ["密鑰", "Keys"],
   "设置": ["設定", "Settings"],
