@@ -118,6 +118,9 @@ pub fn strip_api_key(auth_text: Option<&str>) -> Result<Option<String>> {
         .ok_or_else(|| AppError::JsonParse("auth.json 顶层不是对象".into()))?;
 
     obj.remove("OPENAI_API_KEY");
+    if obj.get("auth_mode").and_then(Value::as_str).is_some_and(|mode| mode.eq_ignore_ascii_case("apikey")) {
+        obj.remove("auth_mode");
+    }
 
     Ok(Some(
         serde_json::to_string_pretty(&Value::Object(obj))

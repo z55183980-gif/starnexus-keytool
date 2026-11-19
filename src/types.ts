@@ -29,7 +29,7 @@ export interface LauncherScan {
   platform: string;
   installations: LauncherInstallation[];
 }
-export interface LaunchRequest { target: LaunchTarget; directory: string }
+export interface LaunchRequest { target: LaunchTarget; directory: string; service?: string }
 
 export interface Profile {
   id: string;
@@ -65,6 +65,7 @@ export interface GatewayToken {
 }
 
 export interface ImportResult {
+  profileIds: string[];
   created: string[];
   updated: string[];
   unchanged: string[];
@@ -84,6 +85,7 @@ export interface SaveProfileRequest {
 }
 
 export interface CodexEnv {
+  builtinRelay?: boolean;
   homeExists: boolean;
   home: string;
   configState: ConfigState;
@@ -96,11 +98,16 @@ export interface CodexEnv {
   activeProfileId: string | null;
   /** 配置指向本网关、带着一把 Key，但没保存在本工具 */
   unsavedGatewayKey: boolean;
+  /** 配置里当前生效的密钥（掩码），AI 或第三方都算；读不到为 null */
+  currentKeyMasked: string | null;
+  /** 当前生效的地址和密钥都读得到、且没保存在本工具：可以加入密钥列表 */
+  adoptable: boolean;
   configurationStatus: ConfigurationStatus;
   statusMessage: string;
 }
 
 export interface ClaudeEnv {
+  configuredModels?: string[];
   homeExists: boolean;
   home: string;
   settingsState: SettingsState;
@@ -110,6 +117,10 @@ export interface ClaudeEnv {
   activeProfileId: string | null;
   /** 配置指向本网关、带着一把 Key，但没保存在本工具 */
   unsavedGatewayKey: boolean;
+  /** 配置里当前生效的密钥（掩码），AI 或第三方都算；读不到为 null */
+  currentKeyMasked: string | null;
+  /** 当前生效的地址和密钥都读得到、且没保存在本工具：可以加入密钥列表 */
+  adoptable: boolean;
   configurationStatus: ConfigurationStatus;
   statusMessage: string;
 }
@@ -170,6 +181,7 @@ export interface ApplyRequest {
   ignoreProxy: boolean;
 
   configureCodex: boolean;
+  codexDesktop?: boolean;
   model: string;
   reasoningEffort: string;
   cleanupResidue: boolean;
@@ -191,6 +203,8 @@ export interface ApplyResult {
   wroteCodexAuth: boolean;
   wroteClaudeSettings: boolean;
   wroteClaudeDesktop?: boolean;
+  /** 写了 Claude 桌面版，但它选的是 Claude.ai 官方登录：这份配置不会被使用 */
+  officialLoginChosen?: boolean;
   paths: string[];
   warnings: string[];
 }

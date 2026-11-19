@@ -1,0 +1,389 @@
+name: StarNexus Key Tool Release
+
+# 打包在 GitHub 的机器上跑，因为 macOS 包只能由 macOS 出：
+# 编译要 Apple 的 SDK，打 DMG 要 hdiutil，签名要 codesign，都是 Mac 独有的。
+on:
+  push:
+    tags:
+      - "v*"
+  # 没打 tag 也能手动跑一次，用来验证流水线本身
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: Build platform
+        type: choice
+        default: all
+        options:
+          - all
+          - macos
+          - windows
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  cli-compatibility:
+    if: github.repository == 'z55183980-gif/starnexus-keytool'
+    runs-on: windows-2022
+    permissions:
+      contents: read
+    strategy:
+      matrix:
+        include:
+          - { codex: '0.100.0', claude: '2.1.20' }
+          - { codex: '0.167.0', claude: '2.1.322' }
+          - { codex: '0.169.0', claude: '2.1.326' }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - shell: pwsh
+        run: |
+          npm ci
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          npm run build
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          $prefix = Join-Path $env:RUNNER_TEMP 'compat-clients'
+          npm install --no-audit --no-fund --prefix $prefix '@openai/codex@${{ matrix.codex }}' '@anthropic-ai/claude-code@${{ matrix.claude }}'
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          # 先编译测试夹具：缓存失效（如版本号变化）时冷编译会超过脚本里 cargo run 的 180 秒时限
+          cargo build --locked --example client_fixture --manifest-path src-tauri/Cargo.toml
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          python scripts/real-client-e2e.py --codex "$prefix/node_modules/.bin/codex.ps1" --claude "$prefix/node_modules/.bin/claude.ps1"
+  build:
+    needs: cli-compatibility
+    # Release credentials and artifacts belong to this repository only.
+    if: github.repository == 'z55183980-gif/starnexus-keytool'
+    runs-on: ${{ matrix.os }}
+    env:
+      STARNEXUS_UPDATER_PUBLIC_KEY: ${{ vars.STARNEXUS_UPDATER_PUBLIC_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+    strategy:
+      # 一个平台挂了，另一个照常出包，便于定位问题
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(inputs.platform == 'macos' && '[{"os":"macos-15-intel","label":"macos"}]' || inputs.platform == 'windows' && '[{"os":"windows-2022","label":"windows"}]' || '[{"os":"macos-15-intel","label":"macos"},{"os":"windows-2022","label":"windows"}]') }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Require updater signing key
+        shell: bash
+        run: |
+          if [ -z "$TAURI_SIGNING_PRIVATE_KEY" ] || [ -z "$STARNEXUS_UPDATER_PUBLIC_KEY" ]; then
+            echo "::error::Configure the dedicated StarNexus updater key pair (see README.md)"
+            exit 1
+          fi
+          node -e "const fs=require('node:fs');const p='src-tauri/tauri.conf.json';const c=JSON.parse(fs.readFileSync(p));c.plugins.updater.pubkey=process.env.STARNEXUS_UPDATER_PUBLIC_KEY;c.bundle.createUpdaterArtifacts=true;fs.writeFileSync(p,JSON.stringify(c))"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      # Intel 和 Apple Silicon 打进同一个包，用户不用挑
+      - name: Add macOS targets
+        if: runner.os == 'macOS'
+        run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - run: npm ci
+
+      - name: Test frontend regressions
+        run: npm test
+
+      # 测试锁着几次真实事故（env_key、废弃的 SMALL_FAST_MODEL 等），
+      # 不能靠人记得跑，放在出包前强制执行
+      - name: Test
+        working-directory: src-tauri
+        run: cargo test --all-targets --locked
+
+      # —————— 签名：有证书就签，没有就出未签名包 ——————
+      # 未签名包只够自己测（要手动去掉隔离属性），不能发给用户。
+      - name: Check signing secrets
+        id: signing
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_PRIVATE_KEY: ${{ secrets.APPLE_API_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -n "$APPLE_CERTIFICATE" ]; then
+            for name in APPLE_CERTIFICATE_PASSWORD KEYCHAIN_PASSWORD APPLE_API_ISSUER APPLE_API_KEY APPLE_API_PRIVATE_KEY; do
+              if [ -z "${!name}" ]; then
+                echo "::error::Missing signing secret: $name"
+                exit 1
+              fi
+            done
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::StarNexus macOS releases require Developer ID signing and notarization"
+            exit 1
+          fi
+
+      - name: Import Apple certificate
+        if: runner.os == 'macOS' && steps.signing.outputs.enabled == 'true'
+        shell: bash
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_PRIVATE_KEY: ${{ secrets.APPLE_API_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          umask 077
+          CERT_PATH="$RUNNER_TEMP/cert.p12"
+          KEYCHAIN="$RUNNER_TEMP/build.keychain-db"
+          printf '%s' "$APPLE_CERTIFICATE" | base64 --decode > "$CERT_PATH"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security default-keychain -s "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security import "$CERT_PATH" -k "$KEYCHAIN" \
+            -P "$APPLE_CERTIFICATE_PASSWORD" \
+            -T /usr/bin/codesign -T /usr/bin/security
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+
+          # 证书里可能有多个身份，必须挑 Developer ID Application 那个 ——
+          # 用 Apple Development 签出来的包发给用户一样打不开
+          IDENTITY=$(security find-identity -v -p codesigning "$KEYCHAIN" \
+            | grep "Developer ID Application" | grep -oE '"[^"]+"' | head -1 | tr -d '"')
+          if [ -z "$IDENTITY" ]; then
+            echo "::error::证书里没有 Developer ID Application 身份"
+            security find-identity -v -p codesigning "$KEYCHAIN"
+            exit 1
+          fi
+          echo "APPLE_SIGNING_IDENTITY=$IDENTITY" >> "$GITHUB_ENV"
+          rm -f "$CERT_PATH"
+
+          # 公证用 App Store Connect API 密钥（和 iOS 上传 TestFlight 用的同一把），
+          # 不用 Apple ID + 专用密码：不依赖某个人的账号，也不会因改密码失效。
+          # Tauri 认 APPLE_API_ISSUER / APPLE_API_KEY / APPLE_API_KEY_PATH 三个变量。
+          KEY_PATH="$RUNNER_TEMP/AuthKey_${APPLE_API_KEY}.p8"
+          printf '%s' "$APPLE_API_PRIVATE_KEY" > "$KEY_PATH"
+          echo "APPLE_API_KEY_PATH=$KEY_PATH" >> "$GITHUB_ENV"
+
+      # 签名和不签名必须分成两个步骤。
+      # 关键在于：没有证书时绝不能让 APPLE_SIGNING_IDENTITY 存在 ——
+      # 哪怕值是空串，Tauri 也会当成"要签名"，然后拿空身份去钥匙串里找，
+      # 报 "The specified item could not be found in the keychain"。
+      # 变量不存在时它才会跳过签名。
+      - name: Build (macOS, 已签名)
+        if: runner.os == 'macOS' && steps.signing.outputs.enabled == 'true'
+        shell: bash
+        timeout-minutes: 60
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ env.APPLE_SIGNING_IDENTITY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY_PATH: ${{ env.APPLE_API_KEY_PATH }}
+        run: |
+          set -uo pipefail
+          # 只有这条路径需要重试 —— Apple 的公证服务经常排队超时，
+          # 单次失败不代表包有问题。不签名的那条路径失败都是确定性的，重试纯浪费。
+          for attempt in 1 2 3; do
+            echo "=== 第 ${attempt}/3 次 ==="
+            if npm run tauri build -- --target universal-apple-darwin; then
+              exit 0
+            fi
+            [ "$attempt" -eq 3 ] && exit 1
+            sleep $((attempt * 60))
+          done
+
+      # —————— Windows 签名：Azure Artifact Signing（原 Trusted Signing），有密钥就签 ——————
+      # 和 macOS 一样分成签/不签两条路：signCommand 一旦写进配置，没有 Azure 凭据时构建就会失败，
+      # 所以不放进 tauri.conf.json，只在密钥齐全时临时生成一份配置用 --config 合并。
+      # 需要的 GitHub 密钥（Settings → Secrets → Actions）：
+      #   AZURE_CLIENT_ID / AZURE_CLIENT_SECRET / AZURE_TENANT_ID   —— 应用注册（服务主体）
+      #   AZURE_SIGNING_ENDPOINT   —— 签名账户所在区域的地址，例如 https://eus.codesigning.azure.net
+      #   AZURE_SIGNING_ACCOUNT    —— 签名账户名
+      #   AZURE_SIGNING_PROFILE    —— 证书配置文件名（Public Trust）
+      - name: Check Windows signing secrets
+        id: winsign
+        if: runner.os == 'Windows'
+        shell: bash
+        env:
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          AZURE_SIGNING_ACCOUNT: ${{ secrets.AZURE_SIGNING_ACCOUNT }}
+        run: |
+          if [ -n "$AZURE_CLIENT_SECRET" ] && [ -n "$AZURE_SIGNING_ACCOUNT" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::未配置 Azure 签名密钥，将产出未签名的 Windows 包，用户下载后 SmartScreen 会显示「未知发布者」"
+          fi
+
+      - name: Prepare Windows signing
+        if: runner.os == 'Windows' && steps.winsign.outputs.enabled == 'true'
+        shell: bash
+        env:
+          SIGN_ENDPOINT: ${{ secrets.AZURE_SIGNING_ENDPOINT }}
+          SIGN_ACCOUNT: ${{ secrets.AZURE_SIGNING_ACCOUNT }}
+          SIGN_PROFILE: ${{ secrets.AZURE_SIGNING_PROFILE }}
+        run: |
+          set -euo pipefail
+          cargo install artifact-signing-cli --locked
+          # 用 {cmd, args} 形式而不是一整行字符串：描述里有空格，拼成字符串会被拆开。
+          # -d 是 MSI 在 UAC 弹窗里显示的名字，不填会显示一串随机字符。
+          node -e '
+            const cfg = { bundle: { windows: { signCommand: {
+              cmd: "artifact-signing-cli",
+              args: ["-e", process.env.SIGN_ENDPOINT, "-a", process.env.SIGN_ACCOUNT,
+                     "-c", process.env.SIGN_PROFILE, "-d", "StarNexus Key Tool", "%1"],
+            } } } };
+            require("fs").writeFileSync(process.argv[1], JSON.stringify(cfg, null, 2));
+          ' "$RUNNER_TEMP/tauri.sign.json"
+
+      - name: Build (Windows, 已签名)
+        if: runner.os == 'Windows' && steps.winsign.outputs.enabled == 'true'
+        shell: bash
+        env:
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+        run: npm run tauri build -- --config "$RUNNER_TEMP/tauri.sign.json"
+
+      - name: Build (Windows, 未签名)
+        if: runner.os == 'Windows' && steps.winsign.outputs.enabled != 'true'
+        run: npm run tauri build
+
+      # 签了就核对一遍：免安装版就是被签过的主程序，三个文件都必须带有效签名，
+      # 否则宁可让流水线失败，也不要把半签的包发出去。
+      - name: Verify Windows signatures
+        if: runner.os == 'Windows' && steps.winsign.outputs.enabled == 'true'
+        shell: pwsh
+        run: |
+          $B = "src-tauri/target/release"
+          $files = @(Get-ChildItem "$B/bundle/nsis/*-setup.exe") + @(Get-ChildItem "$B/bundle/msi/*.msi") + @(Get-Item "$B/starnexus-keytool.exe")
+          $bad = 0
+          foreach ($f in $files) {
+            $s = Get-AuthenticodeSignature $f.FullName
+            Write-Host "$($f.Name): $($s.Status) $($s.SignerCertificate.Subject)"
+            if ($s.Status -ne 'Valid') { $bad++ }
+          }
+          if ($bad -gt 0) { Write-Error "有 $bad 个文件没有有效签名"; exit 1 }
+
+      - name: Collect macOS assets
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p release-assets
+          BUNDLE=src-tauri/target/universal-apple-darwin/release/bundle
+          APP=$(find "$BUNDLE/macos" -maxdepth 1 -name "*.app" -type d | head -1)
+          [ -n "$APP" ] || { echo "::error::没找到 .app"; exit 1; }
+
+          /usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$APP/Contents/Info.plist" | grep -Fx 'com.dkby.starnexus.keytool'
+          lipo -verify_arch x86_64 arm64 "$APP/Contents/MacOS/starnexus-keytool"
+          # 把公证票据钉进 .app，这样用户断网也能通过校验
+          if [ "${{ steps.signing.outputs.enabled }}" = "true" ]; then
+            xcrun stapler staple "$APP"
+            codesign --verify --deep --strict --verbose=2 "$APP"
+            codesign --display --verbose=4 "$APP" 2>&1 | tee "$RUNNER_TEMP/signature-details.txt"
+            grep -F 'Authority=Developer ID Application:' "$RUNNER_TEMP/signature-details.txt"
+            grep -F 'TeamIdentifier=YU6GT6HQJ8' "$RUNNER_TEMP/signature-details.txt"
+            xcrun stapler validate "$APP"
+            spctl --assess --type execute --verbose=4 "$APP"
+          fi
+
+          # 文件名固定、不带版本号：官网下载按钮指向 releases/latest/download/<文件名>，每次发版不用改链接
+          ditto -c -k --sequesterRsrc --keepParent "$APP" \
+            "release-assets/StarNexus-Key-Tool_macOS_universal.zip"
+
+          DMG=$(find "$BUNDLE/dmg" -maxdepth 1 -name "*.dmg" -type f | head -1 || true)
+          [ -n "$DMG" ] && cp "$DMG" "release-assets/StarNexus-Key-Tool_macOS_universal.dmg"
+          # Copy the archive produced and signed by Tauri unchanged.
+          cp "$BUNDLE/macos/"*.app.tar.gz "release-assets/StarNexus-Key-Tool_macOS.app.tar.gz"
+          cp "$BUNDLE/macos/"*.app.tar.gz.sig "release-assets/StarNexus-Key-Tool_macOS.app.tar.gz.sig"
+          cargo run --manifest-path src-tauri/Cargo.toml --locked --example verify_update -- release-assets/StarNexus-Key-Tool_macOS.app.tar.gz
+          if [ "${{ steps.signing.outputs.enabled }}" = "true" ]; then
+            mkdir -p "$RUNNER_TEMP/updater-archive"
+            tar -xzf release-assets/StarNexus-Key-Tool_macOS.app.tar.gz -C "$RUNNER_TEMP/updater-archive"
+            UPDATE_APP=$(find "$RUNNER_TEMP/updater-archive" -maxdepth 2 -name '*.app' -type d | head -1)
+            [ -n "$UPDATE_APP" ] || { echo "::error::Updater archive contains no app"; exit 1; }
+            codesign --verify --deep --strict "$UPDATE_APP"
+            xcrun stapler validate "$UPDATE_APP"
+            spctl --assess --type execute "$UPDATE_APP"
+          fi
+
+      - name: Collect Windows assets
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p release-assets
+          B=src-tauri/target/release
+          # 文件名固定、不带版本号（同 macOS）：官网下载按钮指向 releases/latest/download/<文件名>
+          cp "$B/bundle/nsis/"*-setup.exe "release-assets/StarNexus-Key-Tool_Windows_x64-setup.exe"
+          cp "$B/bundle/msi/"*.msi        "release-assets/StarNexus-Key-Tool_Windows_x64.msi"
+          cp "$B/starnexus-keytool.exe"       "release-assets/StarNexus-Key-Tool_Windows_x64_portable.exe"
+          cp "$B/bundle/nsis/"*-setup.exe.sig "release-assets/StarNexus-Key-Tool_Windows_x64-setup.exe.sig"
+          cp "$B/bundle/msi/"*.msi.sig "release-assets/StarNexus-Key-Tool_Windows_x64.msi.sig"
+          cargo run --manifest-path src-tauri/Cargo.toml --locked --example verify_update -- release-assets/StarNexus-Key-Tool_Windows_x64-setup.exe release-assets/StarNexus-Key-Tool_Windows_x64.msi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.label }}
+          path: release-assets/*
+
+      - name: Clean up Apple signing credentials
+        if: always() && runner.os == 'macOS'
+        shell: bash
+        run: |
+          KEYCHAIN="$RUNNER_TEMP/build.keychain-db"
+          if [ -f "$KEYCHAIN" ]; then
+            security delete-keychain "$KEYCHAIN"
+          fi
+          rm -f "$RUNNER_TEMP/cert.p12" "$RUNNER_TEMP"/AuthKey_*.p8
+
+  # Wait for both platforms; never expose a manifest pointing to missing assets.
+  release:
+    needs: build
+    if: github.repository == 'z55183980-gif/starnexus-keytool' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+      - name: Generate complete updater manifest
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: node scripts/build-updater-manifest.mjs release-assets release-assets/latest.json "$RELEASE_TAG"
+      - name: Generate SHA-256 checksums
+        working-directory: release-assets
+        run: sha256sum StarNexus-* latest.json > SHA256SUMS.txt
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: StarNexus Key Tool ${{ github.ref_name }}
+          body_path: docs/releases/${{ github.ref_name }}.md
+          files: release-assets/*
+          draft: true

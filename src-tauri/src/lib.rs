@@ -5,8 +5,10 @@ pub mod brand;
 pub mod browser_login;
 pub mod claude_config;
 pub mod claude_desktop;
+pub mod client_restart;
 pub mod codex_auth;
 pub mod codex_config;
+mod codex_ownership;
 pub mod commands;
 pub mod detect;
 pub mod error;
@@ -14,8 +16,13 @@ pub mod gateway;
 pub mod health;
 pub mod launcher;
 pub mod paths;
+pub mod process;
 pub mod state;
 pub mod ui_lang;
+pub mod updates;
+pub mod tray_menu;
+pub mod client_setup;
+pub mod client_download;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{Emitter, Manager};
@@ -75,49 +82,26 @@ fn watch_login_callback(app: &tauri::App) {
     });
 }
 
-/// 托盘菜单项：切换语言时要改它们的文字
-#[cfg(desktop)]
-struct TrayMenu {
-    show: tauri::menu::MenuItem<tauri::Wry>,
-    quit: tauri::menu::MenuItem<tauri::Wry>,
-}
-
-#[cfg(desktop)]
-fn tray_texts() -> (&'static str, &'static str) {
-    (
-        ui_lang::pick("显示主窗口", "顯示主視窗", "Show window"),
-        ui_lang::pick("退出", "退出", "Quit"),
-    )
-}
-
 /// 按当前界面语言更新窗口标题、托盘提示和托盘菜单
 pub(crate) fn apply_native_language(app: &tauri::AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
-        let _ = window.set_title(ui_lang::app_name());
+        // 顶栏只保留图标，不显示文字标题
+        let _ = window.set_title("");
     }
     #[cfg(desktop)]
     {
         if let Some(tray) = app.tray_by_id("main") {
             let _ = tray.set_tooltip(Some(ui_lang::app_name()));
         }
-        if let Some(menu) = app.try_state::<TrayMenu>() {
-            let (show, quit) = tray_texts();
-            let _ = menu.show.set_text(show);
-            let _ = menu.quit.set_text(quit);
-        }
+        tray_menu::refresh(app);
     }
 }
 
 #[cfg(desktop)]
 fn build_tray(app: &tauri::App) -> tauri::Result<()> {
-    use tauri::menu::{Menu, MenuItem};
     use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 
-    let (show_text, quit_text) = tray_texts();
-    let show = MenuItem::with_id(app, "show", show_text, true, None::<&str>)?;
-    let quit = MenuItem::with_id(app, "quit", quit_text, true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&show, &quit])?;
-    app.manage(TrayMenu { show: show.clone(), quit: quit.clone() });
+    let menu = tray_menu::menu(app.handle())?;
     let mut tray = TrayIconBuilder::with_id("main")
         .tooltip(ui_lang::app_name())
         .menu(&menu)
@@ -125,7 +109,7 @@ fn build_tray(app: &tauri::App) -> tauri::Result<()> {
         .on_menu_event(|app, event| match event.id.as_ref() {
             "show" => show_main(app),
             "quit" => app.exit(0),
-            _ => {}
+            id => tray_menu::dispatch(app, id),
         })
         .on_tray_icon_event(|tray, event| {
             if let TrayIconEvent::Click {
@@ -144,6 +128,12 @@ fn build_tray(app: &tauri::App) -> tauri::Result<()> {
     Ok(())
 }
 
+/// 记住的窗口状态：位置和大小
+fn window_state_flags() -> tauri_plugin_window_state::StateFlags {
+    use tauri_plugin_window_state::StateFlags;
+    StateFlags::POSITION | StateFlags::SIZE
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let builder = tauri::Builder::default();
@@ -158,6 +148,11 @@ pub fn run() {
         .manage(browser_login::BrowserLogin::default())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        // 只记位置和大小：可见性由托盘决定，不能让插件在启动时把窗口藏起来或弹出来
+        .plugin(tauri_plugin_window_state::Builder::new().with_state_flags(window_state_flags()).build())
+        .manage(updates::UpdateState::default())
+        .manage(tray_menu::TrayState::default())
         .manage(gateway::SessionState::new())
         .manage(TrayReady(AtomicBool::new(false)))
         .manage(commands::HealthCache::default())
@@ -167,7 +162,8 @@ pub fn run() {
             // 先定界面语言：保存过的选择优先，没有就跟随系统（认不出来用英文）
             ui_lang::init(&state::load().map(|s| s.ui_lang).unwrap_or_default());
             if let Some(window) = app.get_webview_window("main") {
-                let _ = window.set_title(ui_lang::app_name());
+                // 顶栏只保留图标，不显示文字标题
+                let _ = window.set_title("");
             }
             #[cfg(desktop)]
             if build_tray(app).is_ok() {
@@ -182,6 +178,9 @@ pub fn run() {
                     && window.state::<TrayReady>().0.load(Ordering::Relaxed)
                 {
                     api.prevent_close();
+                    // 关闭只是隐藏、进程不退出，插件等不到退出事件：隐藏前先存一次位置和大小
+                    use tauri_plugin_window_state::AppHandleExt;
+                    let _ = window.app_handle().save_window_state(window_state_flags());
                     let _ = window.hide();
                 }
             }
@@ -193,6 +192,17 @@ pub fn run() {
             launcher::scan_launchers,
             launcher::validate_launch,
             launcher::launch_client,
+            client_restart::running_desktop_clients,
+            client_restart::restart_desktop_client,
+            client_restart::switch_claude_desktop_to_third_party,
+            client_restart::claude_desktop_official_login,
+            launcher::validate_project_directory,
+            tray_menu::take_tray_action,
+            client_setup::client_install_guide,
+            client_setup::open_client_download,
+            client_setup::open_setup_terminal,
+            client_download::install_client,
+            client_setup::check_client_version,
             commands::load_app_state,
             browser_login::gateway_browser_login_start,
             browser_login::gateway_browser_login_finish,
@@ -209,6 +219,10 @@ pub fn run() {
             commands::save_profile,
             commands::delete_profile,
             commands::get_remote_config,
+            updates::get_client_policy,
+            updates::check_for_updates,
+            updates::install_update,
+            updates::open_update_download,
             commands::test_connection,
             commands::list_backups,
             commands::restore_backup,

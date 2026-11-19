@@ -35,7 +35,7 @@
 
 0.1.2 移除 AI 诊断输入框和后端模型调用，不再依赖 DeepSeek 或任何固定诊断模型。保留原有基础体检、密钥/模型目录连通性检查和修复；修复后重新检查。
 
-Claude / Codex 页的活动记录下方提供「复制脱敏诊断信息」。同意读取当前工具配置并完成体检后即可复制，无需额外登录或选择诊断模型。复制只在本机生成摘要和写入剪贴板，不请求网络、不调用模型。
+Claude / Codex 页的启动状态下方提供「复制脱敏诊断信息」。同意读取当前工具配置并完成体检后即可复制，无需额外登录或选择诊断模型。复制只在本机生成摘要和写入剪贴板，不请求网络、不调用模型。
 
 摘要采用字段白名单：应用版本、所选工具和启动方式、配置状态、固定体检问题说明及修复动作。密钥、账号信息、本机路径、服务地址、模型原值、原始配置/日志和解析错误原文均不导出。网络体检仍可能读取当前 Key 的 `/models`，不会为了诊断调用推理接口。
 
@@ -60,3 +60,11 @@ Mac 产物附带 macOS-signature-verification.txt，记录签名身份、Team ID
 如需为同仓库已签名的安装包补做公证，可手动运行 Notarize existing StarNexus Mac package 工作流，传入原成功构建 run ID。该流程会先核对原 SHA256、签名及应用标识，再公证、装订票据和验证 Gatekeeper，不重新编译。
 
 Logo 直接复制自 D:/projects/starnexus/web/default/public/logo.png；安装图标通过 Tauri icon 生成。源功能快照版本见 source-revision.txt；此后本项目独立维护，不回写原项目。
+
+## 0.2.9 同步说明
+
+移植自 `ourzai-keytool` 的 `2ea51e8`：首次使用引导、桌面与 CLI 客户端设置、托盘快捷操作、逐密钥模型选择、配置备份与恢复以及写入后的重启确认。保留 StarNexus 登录、密钥库、图标和仅在本机生成的诊断摘要。
+
+客户端安装默认从官方地址下载，不连接其他产品的中继。可在构建时用 `STARNEXUS_DOWNLOAD_RELAY` 指定自有 HTTPS 中继。更新策略位于本仓库的 `updates/config.json`；未发布可验证的包前，不要提高最低版本。没有单独配置本产品更新签名时，请在 `https://dkby.com/keys` 手动下载。
+
+发布使用独立的 `release.yml`：在本仓库设置变量 `STARNEXUS_UPDATER_PUBLIC_KEY`（Tauri 公钥文件内容）及对应的 secrets `TAURI_SIGNING_PRIVATE_KEY`、`TAURI_SIGNING_PRIVATE_KEY_PASSWORD`；不要使用其他产品的密钥。发布标签会在 Windows 与 macOS 验证签名后生成草稿及 `latest.json`，不会自动公开或更改网站。旧版安装包不含此更新器，首次升级须手动安装。

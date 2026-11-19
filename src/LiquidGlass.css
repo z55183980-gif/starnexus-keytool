@@ -115,14 +115,14 @@ body {
   box-shadow: none !important;
   color: #007a66;
 }
-.tool-hero > .launch-modes, .lang-switch {
+.tool-hero-head > .launch-modes, .lang-switch {
   position: relative; isolation: isolate; width: 100%;
   display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0; padding: 4px;
   background: rgba(250,251,252,.52); border: 1px solid rgba(255,255,255,.48);
   -webkit-backdrop-filter: blur(24px) saturate(145%); backdrop-filter: blur(24px) saturate(145%);
   box-shadow: 0 0 0 .5px rgba(35,46,58,.06), 0 3px 12px rgba(35,46,58,.07);
 }
-.lang-switch { grid-template-columns: repeat(3, minmax(0, 1fr)); width: min(100%, 330px); }
+.lang-switch { grid-template-columns: repeat(var(--lang-count, 4), minmax(0, 1fr)); width: min(100%, 400px); }
 .settings-page > .lang-switch { width: 100%; margin: 0; }
 .launch-mode-lens, .lang-lens {
   position: absolute; top: 4px; bottom: 4px; left: 4px; z-index: 0;
@@ -130,8 +130,8 @@ body {
   background: rgba(54,70,74,.085);
   transition: transform 420ms cubic-bezier(.22,1.12,.36,1);
 }
-.lang-lens { width: calc((100% - 8px) / 3); }
-.tool-hero > .launch-modes button { position: relative; z-index: 1; min-width: 0; min-height: 38px; -webkit-tap-highlight-color: transparent; }
+.lang-lens { width: calc((100% - 8px) / var(--lang-count, 4)); }
+.tool-hero-head > .launch-modes button { position: relative; z-index: 1; min-width: 0; min-height: 38px; -webkit-tap-highlight-color: transparent; }
 .launch-mode-tab .ui-icon { transition: transform 180ms ease; }
 .launch-mode-tab:focus:not(:focus-visible) { outline: none; }
 .launch-mode-tab:focus-visible { outline-offset: -3px; }
@@ -220,35 +220,33 @@ button.primary:disabled, .launcher-pages button.primary:disabled, .key-actions >
 
 /* Shared pointer feedback for page and dialog actions; the dock has its own motion.
    The interaction rules intentionally override older component hover borders. */
-:is(.launcher-app, .account-dialog) button:not(.nav-tab, .launch-mode-tab, .lang-tab) {
+:is(.launcher-app, .account-dialog) button:not(.nav-tab, .launch-mode-tab, .lang-tab, .install-inline-action) {
   transition: translate 180ms ease, background-color 180ms ease, box-shadow 180ms ease, color 180ms ease;
 }
 :is(.launcher-app, .account-dialog) button:not(.nav-tab):focus:not(:focus-visible) { outline: none; }
 @media (hover: hover) and (pointer: fine) {
-  :is(.launcher-app, .account-dialog) button:not(.nav-tab, .launch-mode-tab, .lang-tab):hover:not(:disabled) {
+  :is(.launcher-app, .account-dialog) button:not(.nav-tab, .launch-mode-tab, .lang-tab, .install-inline-action):hover:not(:disabled) {
     translate: 0 -1px;
     border-color: transparent !important;
     box-shadow: inset 0 1px 0 rgba(255,255,255,.7), 0 3px 10px rgba(36,52,80,.07) !important;
   }
-  :is(.launcher-app, .account-dialog) button:not(.nav-tab, .launch-mode-tab, .lang-tab):not(.danger):hover:not(:disabled) {
+  :is(.launcher-app, .account-dialog) button:not(.nav-tab, .launch-mode-tab, .lang-tab, .install-inline-action):not(.danger):hover:not(:disabled) {
     background: var(--button-hover-bg, rgba(255,255,255,.9)) !important;
     filter: none;
   }
   /* Text links and list rows brighten without gaining a raised button container. */
-  :is(.launcher-app, .account-dialog) button:is(.site, .cauth-link, .console-clear, .console-action, .console-toggle, .setting-link, .service-option, .workdir-row, .model-option):hover:not(:disabled) {
+  :is(.launcher-app, .account-dialog) button:is(.site, .cauth-link, .console-clear, .console-action, .console-toggle, .setting-link, .service-option, .service-pick, .workdir-row, .model-option):hover:not(:disabled) {
     translate: none;
     box-shadow: none !important;
   }
-  :is(.launcher-app, .account-dialog) button:not(.nav-tab, .launch-mode-tab, .lang-tab):active:not(:disabled) {
+  :is(.launcher-app, .account-dialog) button:not(.nav-tab, .launch-mode-tab, .lang-tab, .install-inline-action):active:not(:disabled) {
     translate: none;
     transform: none;
     box-shadow: inset 0 1px 3px rgba(36,52,80,.06) !important;
   }
 }
 
-@media (max-width: 720px) {
-  .tool-hero { border-radius: 26px; }
-}
+.tool-hero { border-radius: 26px; }
 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
   .nav-pill.liquid-glass, .picker-sheet { background: #f5f8fd; }
   .tool-hero, .onboard, .key-workspace .card, .settings-card { background: #fafcff; }
@@ -258,7 +256,7 @@ button.primary:disabled, .launcher-pages button.primary:disabled, .key-actions >
   .nav-pill.liquid-glass, .picker-sheet, .console { background: #f8faff; }
   .nav-pill.liquid-glass { background: #f4f5f6; }
   .nav-pill .nav-lens, .launch-mode-lens, .lang-lens { background: #e0e5e4; }
-  .tool-hero > .launch-modes, .lang-switch { background: #f4f5f6; -webkit-backdrop-filter: none; backdrop-filter: none; }
+  .tool-hero-head > .launch-modes, .lang-switch { background: #f4f5f6; -webkit-backdrop-filter: none; backdrop-filter: none; }
   .tool-hero, .onboard, .key-workspace .card, .settings-card, .nav-pill.liquid-glass, .picker-sheet, .picker-overlay { -webkit-backdrop-filter: none; backdrop-filter: none; }
 }
 @media (prefers-contrast: more) {
@@ -278,3 +276,23 @@ button.primary:disabled, .launcher-pages button.primary:disabled, .key-actions >
   .nav-pill .nav-lens, .nav-tab, button.primary, .launcher-pages button.primary, .key-actions > button.primary, .account-dialog .cauth-submit { transition: none; }
   .nav-tab:active:not(:disabled), button.primary:active:not(:disabled), .account-dialog .cauth-submit:active:not(:disabled) { transform: none; }
 }
+
+/* 标题区两行网格：标题与启动方式切换同一行，安装状态独占第二行、延伸到右边缘 */
+.tool-hero-head { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; grid-template-rows: auto auto; column-gap: 12px; row-gap: 0; align-items: center; }
+.tool-hero-head .launch-title { display: contents; }
+.tool-hero-head .launch-brand { grid-column: 1; grid-row: 1 / 3; align-self: center; }
+.tool-hero-head h1 { grid-column: 2; grid-row: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tool-hero-head .install-status-row { grid-column: 2 / -1; grid-row: 2; min-width: 0; }
+.tool-hero-head > .launch-modes { grid-column: 3; grid-row: 1; justify-self: end; width: auto; grid-template-columns: repeat(2, 1fr); padding: 3px; }
+.tool-hero-head > .launch-modes .launch-mode-lens { top: 3px; bottom: 3px; left: 3px; width: calc((100% - 6px) / 2); }
+.tool-hero-head > .launch-modes button { position: relative; z-index: 1; min-width: 0; min-height: 30px; gap: 4px; padding: 4px 9px; font-size: 13px; -webkit-tap-highlight-color: transparent; }
+
+.connection-guide { display: grid; gap: 10px; }
+.connection-guide h2 { margin: 0 0 4px; font-size: 16px; }
+.launcher-pages .connection-guide > button:not(.primary):not(.site) { display: flex; align-items: center; gap: 12px; min-height: 52px; text-align: start; padding: 10px 14px; border: 1px solid #dbe3eb; border-radius: 14px; background: #fafcfe; color: inherit; box-shadow: none; }
+.connection-guide > button > span { display: grid; gap: 2px; }
+.connection-guide > button > .ui-icon:last-child { margin-inline-start: auto; }
+.connection-guide small { font-size: 12px; color: var(--dim); }
+.connection-guide > button > .brand { width: 24px; height: 24px; }
+.tool-hero.is-gated { min-height: 0; }
+.tool-hero.is-gated .read-gate { position: static; border: none; background: none; backdrop-filter: none; padding: 12px 0; }

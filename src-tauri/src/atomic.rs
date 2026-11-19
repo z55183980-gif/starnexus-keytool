@@ -84,11 +84,11 @@ fn restrict_permissions(path: &Path) -> Result<()> {
         use std::os::windows::process::CommandExt;
         let user = std::env::var("USERNAME")
             .map_err(|_| AppError::Io("无法确定当前用户，未写入密钥文件".into()))?;
-        let output = std::process::Command::new("icacls")
+        let root = std::env::var_os("SystemRoot").unwrap_or_else(|| "C:\\Windows".into());
+        let output = crate::process::output(std::process::Command::new(PathBuf::from(root).join("System32/icacls.exe"))
             .arg(path)
             .args(["/inheritance:r", "/grant:r", &format!("{}:F", user)])
-            .creation_flags(0x08000000)
-            .output()?;
+            .creation_flags(0x08000000), crate::process::HELPER_TIMEOUT)?;
         if !output.status.success() {
             return Err(AppError::Io("无法限制配置文件访问权限，未写入密钥".into()));
         }
@@ -107,6 +107,7 @@ struct Change {
 #[derive(Default)]
 pub struct TwoFileTxn {
     changes: Vec<Change>,
+    guards: Vec<(PathBuf, Option<Vec<u8>>)>,
 }
 
 impl TwoFileTxn {
@@ -118,6 +119,22 @@ impl TwoFileTxn {
     }
     pub fn write(&mut self, path: &Path, content: &str) -> Result<()> {
         self.set(path, Some(content.as_bytes().to_vec()))
+    }
+    pub fn stage_text(&mut self, path: &Path, before: Option<&str>, after: Option<&str>) {
+        self.stage(path, before.map(|text| text.as_bytes().to_vec()), after.map(|text| text.as_bytes().to_vec()));
+    }
+    /// 以合并时读到的原始字节为基线；提交时文件已不是这份内容就整体放弃
+    pub fn stage(&mut self, path: &Path, before: Option<Vec<u8>>, after: Option<Vec<u8>>) {
+        self.changes.push(Change { path: path.into(), before, after });
+    }
+    pub fn guard_text(&mut self, path: &Path, before: Option<&str>) {
+        self.guards.push((path.into(), before.map(|text| text.as_bytes().to_vec())));
+    }
+    fn check_guards(&self) -> Result<()> {
+        for (path, expected) in &self.guards {
+            if &read_optional(path)? != expected { return Err(AppError::Io(format!("{} 已被其他程序修改，请刷新后重试", path.display()))); }
+        }
+        Ok(())
     }
     pub fn set(&mut self, path: &Path, content: Option<Vec<u8>>) -> Result<()> {
         if let Some(change) = self.changes.iter_mut().find(|c| c.path == path) {
@@ -145,6 +162,7 @@ impl TwoFileTxn {
         }
         for (index, c) in self.changes.iter().enumerate() {
             let result = (|| {
+                self.check_guards()?;
                 if read_optional(&c.path)? != c.before {
                     return Err(AppError::Io(format!(
                         "{} 已被其他程序修改",
@@ -207,6 +225,16 @@ pub(crate) mod tests {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(&self.0);
         }
+    }
+    #[test]
+    fn refuses_edits_between_merge_and_staging() {
+        let dir = TestDir::new();
+        let path = dir.0.join("settings");
+        fs::write(&path, "external").unwrap();
+        let mut txn = TwoFileTxn::new();
+        txn.stage_text(&path, Some("original"), Some("merged"));
+        assert!(txn.commit().is_err());
+        assert_eq!(fs::read_to_string(path).unwrap(), "external");
     }
     #[test]
     fn replaces_existing_file() {

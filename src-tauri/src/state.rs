@@ -113,6 +113,44 @@ pub struct DesktopKeyRecord {
     /// 第一次看到的密文；之后密文变了说明有人在桌面版里改过密钥
     #[serde(default)]
     pub sealed: Option<String>,
+    /// 写入时的配置条目、网关地址和模型。密文出现时三者都必须与写入时一致才认作这把密钥；
+    /// 旧版本留下的记录没有这些字段，一律不认，重新保存一次即可。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub models: Vec<String>,
+}
+
+/// 桌面版配置条目里与密钥一起写入的那几项，用来核对密文是不是本工具写入后加密的结果。
+pub struct DesktopEntry<'a> {
+    pub path: &'a str,
+    pub base_url: Option<&'a str>,
+    pub models: &'a [String],
+}
+
+impl DesktopKeyRecord {
+    /// 认出密文就返回密钥编号。首次见到的密文只在条目、地址、模型都与写入时一致、
+    /// 且该密钥未被替换时才绑定；绑定后密文一变就不再认。
+    /// 残余风险：写入后、首次扫描前若在桌面版里换成同地址同模型的另一把密钥，仍会被误认。
+    fn match_sealed(&mut self, profile_key: Option<&str>, sealed: &str, entry: &DesktopEntry) -> Option<String> {
+        if profile_key.map(key_hash).as_deref() != Some(self.key_hash.as_str()) {
+            return None;
+        }
+        let same_url = self.base_url.as_deref().zip(entry.base_url)
+            .is_some_and(|(a, b)| a.trim_end_matches('/') == b.trim_end_matches('/'));
+        if self.path.as_deref() != Some(entry.path) || !same_url || self.models != entry.models {
+            return None;
+        }
+        match self.sealed.as_deref() {
+            Some(bound) => (bound == sealed).then(|| self.profile_id.clone()),
+            None => {
+                self.sealed = Some(sealed.to_string());
+                Some(self.profile_id.clone())
+            }
+        }
+    }
 }
 
 pub fn key_hash(key: &str) -> String {
@@ -123,44 +161,50 @@ pub fn key_hash(key: &str) -> String {
         .collect()
 }
 
-pub fn remember_desktop_key(profile_id: &str, key: &str) -> Result<()> {
+/// 写入桌面版后记下这次写入的密钥和条目；密文要等桌面版自己加密后才出现。
+pub fn remember_desktop_key(profile_id: &str, key: &str, entry: &DesktopEntry) -> Result<()> {
     let record = DesktopKeyRecord {
         profile_id: profile_id.into(),
         key_hash: key_hash(key),
         sealed: None,
+        path: Some(entry.path.into()),
+        base_url: entry.base_url.map(str::to_string),
+        models: entry.models.to_vec(),
     };
     update(|st| st.claude_desktop_key = Some(record))
 }
 
-pub fn forget_desktop_key() -> Result<()> {
-    update(|st| st.claude_desktop_key = None)
+/// 桌面版里的密文是不是本工具最近写入的那把：是就返回密钥编号。
+pub fn match_sealed_desktop_key(sealed: &str, entry: &DesktopEntry) -> Result<Option<String>> {
+    let _guard = STATE_LOCK.lock().map_err(|_| AppError::Other("密钥状态锁不可用，请重启".into()))?;
+    let mut st = load_inner()?;
+    let Some(record) = st.claude_desktop_key.as_mut() else { return Ok(None) };
+    let was_bound = record.sealed.is_some();
+    let key = load_profile_key(&record.profile_id)?;
+    let matched = record.match_sealed(key.as_deref(), sealed, entry);
+    if matched.is_some() && !was_bound {
+        save(&st)?;
+    }
+    Ok(matched)
 }
 
-/// 桌面版里的密文是不是我们最近写的那把：是就返回密钥编号。
-/// 写入后第一次见到的密文认作那把密钥加密后的样子，并记下来。
-pub fn match_sealed_desktop_key(sealed: &str) -> Result<Option<String>> {
-    let Some(record) = load()?.claude_desktop_key else {
-        return Ok(None);
-    };
-    let Some(key) = load_profile_key(&record.profile_id)? else {
-        return Ok(None);
-    };
-    if key_hash(&key) != record.key_hash {
+/// 本工具里保存过这把密钥的密钥编号（不看服务地址）。
+/// 用来确认旧版本写进 auth.json、没有归属记录的网关密钥确实来自本工具。
+pub fn profile_with_key(key: &str) -> Result<Option<String>> {
+    let key = key.trim();
+    if key.is_empty() {
         return Ok(None);
     }
-    match record.sealed.as_deref() {
-        Some(s) if s == sealed => Ok(Some(record.profile_id)),
-        Some(_) => Ok(None),
-        None => {
-            let sealed = sealed.to_string();
-            update(|st| {
-                if let Some(r) = st.claude_desktop_key.as_mut() {
-                    r.sealed = Some(sealed);
-                }
-            })?;
-            Ok(Some(record.profile_id))
+    for profile in load()?.profiles {
+        if load_profile_key(&profile.id)?.as_deref().map(str::trim) == Some(key) {
+            return Ok(Some(profile.id));
         }
     }
+    Ok(None)
+}
+
+pub fn forget_desktop_key() -> Result<()> {
+    update(|st| st.claude_desktop_key = None)
 }
 
 pub fn load() -> Result<AppState> {
@@ -299,7 +343,7 @@ fn change_key_and_save(
 /// 不能用「个数+1」：删掉中间某个后再新建会和现存的重名。
 pub fn next_default_name(profiles: &[Profile]) -> String {
     for n in 1.. {
-        let candidate = format!("{} {}", crate::ui_lang::pick("密钥", "密鑰", "Key"), n);
+        let candidate = format!("{} {}", crate::ui_lang::pick("密钥", "密鑰", "Key", "Ключ"), n);
         if !profiles.iter().any(|p| p.name == candidate) {
             return candidate;
         }
@@ -390,9 +434,92 @@ pub fn match_profile(live_key: Option<&str>) -> Result<Option<String>> {
     Ok(None)
 }
 
+/// A key alone is not a service identity. Prefer the requested profile only when
+/// both its endpoint and credential match the configuration being inspected.
+pub fn match_profile_for(live_key: Option<&str>, base: Option<&str>, codex: bool, gateway: &str, preferred: Option<&str>) -> Result<Option<String>> {
+    match_profile_in(&load()?.profiles, live_key, base, codex, gateway, preferred, load_profile_key)
+}
+
+fn match_profile_in(profiles: &[Profile], live: Option<&str>, base: Option<&str>, codex: bool, gateway: &str, preferred: Option<&str>, key: impl Fn(&str) -> Result<Option<String>>) -> Result<Option<String>> {
+    let Some(live) = live.map(str::trim).filter(|k| !k.is_empty()) else { return Ok(None) };
+    let Some(base) = base else { return Ok(None) };
+    let candidates = profiles.iter().filter(|p| Some(p.id.as_str()) == preferred)
+        .chain(profiles.iter().filter(|p| Some(p.id.as_str()) != preferred));
+    for p in candidates {
+        let endpoint = if codex { p.openai_base(gateway) } else { p.anthropic_base(gateway) };
+        if endpoint.as_deref().is_some_and(|u| u.trim_end_matches('/') == base.trim_end_matches('/'))
+            && key(&p.id)?.as_deref() == Some(live) {
+            return Ok(Some(p.id.clone()));
+        }
+    }
+    Ok(None)
+}
+
+/// 界面上只显示掩码，永远不回显完整 key
+pub fn mask(key: &str) -> String {
+    let n = key.chars().count();
+    if n <= 8 {
+        return "•".repeat(n.max(4));
+    }
+    let head: String = key.chars().take(3).collect();
+    let tail: String = key.chars().skip(n - 4).collect();
+    format!("{}{}{}", head, "•".repeat(8), tail)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sealed_desktop_key_binds_only_to_the_unchanged_entry_it_was_written_to() {
+        let models = vec!["m1".to_string()];
+        let entry = |path, base_url, models| DesktopEntry { path, base_url, models };
+        let fresh = || DesktopKeyRecord {
+            profile_id: "A".into(), key_hash: key_hash("sk-a"), sealed: None,
+            path: Some("cfg-1".into()), base_url: Some("https://gw.example".into()), models: models.clone(),
+        };
+        let written = entry("cfg-1", Some("https://gw.example/"), &models);
+
+        // 首次密文：条目、地址、模型都没变才绑定；之后密文变了就不再认
+        let mut record = fresh();
+        assert_eq!(record.match_sealed(Some("sk-a"), "__sealed__:v1:X", &written).as_deref(), Some("A"));
+        assert_eq!(record.match_sealed(Some("sk-a"), "__sealed__:v1:X", &written).as_deref(), Some("A"));
+        assert!(record.match_sealed(Some("sk-a"), "__sealed__:v1:Y", &written).is_none());
+
+        // 切换了配置条目、改了地址或模型、密钥被替换，都不绑定
+        let other_models = vec!["m2".to_string()];
+        for (key, e) in [
+            (Some("sk-a"), entry("cfg-2", Some("https://gw.example"), &models)),
+            (Some("sk-a"), entry("cfg-1", Some("https://other.example"), &models)),
+            (Some("sk-a"), entry("cfg-1", Some("https://gw.example"), &other_models)),
+            (Some("sk-b"), entry("cfg-1", Some("https://gw.example"), &models)),
+            (None, entry("cfg-1", Some("https://gw.example"), &models)),
+        ] {
+            let mut record = fresh();
+            assert!(record.match_sealed(key, "__sealed__:v2:Z", &e).is_none());
+            assert!(record.sealed.is_none());
+        }
+
+        // 旧版本记录缺少条目信息：不认
+        let mut legacy = DesktopKeyRecord { profile_id: "A".into(), key_hash: key_hash("sk-a"), ..Default::default() };
+        assert!(legacy.match_sealed(Some("sk-a"), "__sealed__:v1:X", &written).is_none());
+    }
+
+    #[test]
+    fn duplicate_keys_match_requested_profile_only_at_its_own_endpoint() {
+        let gateway = "https://gateway.dkby.com/v1";
+        let profiles = vec![
+            Profile { id: "first".into(), codex_base_url: "https://a.example/v1".into(), ..Default::default() },
+            Profile { id: "second".into(), codex_base_url: "https://a.example/v1".into(), ..Default::default() },
+            Profile { id: "other-service".into(), codex_base_url: "https://b.example/v1".into(), ..Default::default() },
+        ];
+        let match_at = |url, preferred| match_profile_in(&profiles, Some("same-key"), Some(url), true, gateway, preferred, |_| Ok(Some("same-key".into()))).unwrap();
+        assert_eq!(match_at("https://a.example/v1/", Some("second")).as_deref(), Some("second"));
+        assert_eq!(match_at("https://a.example/v1", Some("other-service")).as_deref(), Some("first"));
+        assert_eq!(match_at("https://b.example/v1", Some("second")).as_deref(), Some("other-service"));
+        assert_eq!(match_at(gateway, Some("second")), None);
+        assert_eq!(match_profile_in(&profiles, Some("wrong-key"), Some("https://a.example/v1"), true, gateway, Some("second"), |_| Ok(Some("same-key".into()))).unwrap(), None);
+    }
 
     #[test]
     fn zai_keys_use_the_gateway_and_custom_keys_their_own_urls() {
@@ -506,7 +633,7 @@ mod tests {
 
     #[test]
     fn default_name_skips_taken_numbers() {
-        let prefix = crate::ui_lang::pick("密钥", "密鑰", "Key");
+        let prefix = crate::ui_lang::pick("密钥", "密鑰", "Key", "Ключ");
         let list = vec![p(&format!("{prefix} 1")), p(&format!("{prefix} 3"))];
         assert_eq!(next_default_name(&list), format!("{prefix} 2"));
     }
@@ -515,32 +642,21 @@ mod tests {
     #[test]
     fn default_name_avoids_collision_after_delete() {
         // 原本有默认名 1 / 2，删掉 1 后只剩一个
-        let prefix = crate::ui_lang::pick("密钥", "密鑰", "Key");
+        let prefix = crate::ui_lang::pick("密钥", "密鑰", "Key", "Ключ");
         let list = vec![p(&format!("{prefix} 2"))];
         assert_eq!(next_default_name(&list), format!("{prefix} 1"));
     }
 
     #[test]
     fn default_name_on_empty_list() {
-        let prefix = crate::ui_lang::pick("密钥", "密鑰", "Key");
+        let prefix = crate::ui_lang::pick("密钥", "密鑰", "Key", "Ключ");
         assert_eq!(next_default_name(&[]), format!("{prefix} 1"));
     }
 
     #[test]
     fn custom_names_do_not_block_numbering() {
         let list = vec![p("主号"), p("测试号")];
-        let prefix = crate::ui_lang::pick("密钥", "密鑰", "Key");
+        let prefix = crate::ui_lang::pick("密钥", "密鑰", "Key", "Ключ");
         assert_eq!(next_default_name(&list), format!("{prefix} 1"));
     }
-}
-
-/// 界面上只显示掩码，永远不回显完整 key
-pub fn mask(key: &str) -> String {
-    let n = key.chars().count();
-    if n <= 8 {
-        return "•".repeat(n.max(4));
-    }
-    let head: String = key.chars().take(3).collect();
-    let tail: String = key.chars().skip(n - 4).collect();
-    format!("{}{}{}", head, "•".repeat(8), tail)
 }

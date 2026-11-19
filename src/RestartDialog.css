@@ -1,0 +1,11 @@
+/* 确认弹窗（重启客户端、切换启动方式）：标题 + 一句说明 + 两个等宽按钮 */
+.confirm-dialog { width: 100%; max-width: 340px; box-sizing: border-box; padding: 22px 20px 18px; border-radius: 18px; background: var(--bg); box-shadow: 0 18px 50px rgba(15, 23, 42, .22), 0 0 0 .5px rgba(15, 23, 42, .08); }
+.confirm-dialog h2 { margin: 0 0 8px; font-size: 16px; font-weight: 600; line-height: 1.4; }
+.confirm-dialog p { margin: 0; font-size: 14px; line-height: 1.6; color: var(--fg); }
+.confirm-dialog .confirm-note { margin-top: 4px; font-size: 13px; color: var(--dim); }
+.confirm-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 20px; }
+.confirm-dialog button.confirm-btn { min-height: 40px; padding: 8px 12px; border: 0; border-radius: 12px; background: #f1f3f5; color: var(--fg); box-shadow: none; font: inherit; font-size: 14px; font-weight: 500; cursor: pointer; }
+.confirm-dialog button.confirm-btn:hover:not(:disabled) { background: #e7eaee; border-color: transparent; }
+.confirm-dialog button.confirm-btn.confirm-primary { background: #087b65; color: #fff; font-weight: 600; }
+.confirm-dialog button.confirm-btn.confirm-primary:hover:not(:disabled) { background: #066551; }
+.confirm-dialog button.confirm-btn:disabled { opacity: .6; cursor: default; }

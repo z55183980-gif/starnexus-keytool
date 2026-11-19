@@ -6,7 +6,7 @@ import { t } from "./i18n";
  * - 保存、写入配置、启动、体检都写在这里，可以回看。
  * - 行尾可以挂按钮（撤销、修复、换模型……）。同一组（group）里只有最新一批（batch）的按钮可点，
  *   避免点到已经过时的那条。
- * - 标签栏右侧是当前工具的体检状态；可以复制脱敏后的体检摘要。
+ * - 放在设置页的「诊断日志」里，工具页不常驻；status、prompt 都是可选的，不传就不显示。
  */
 export type LogKind = "cmd" | "ok" | "err" | "warn" | "info" | "path";
 export interface LogAction {
@@ -21,6 +21,8 @@ export interface LogLine {
   group?: string;
   batch?: number;
   actions?: LogAction[];
+  /** 只给工具页底部的提示条用的撤销（日志里已有「撤销这次改动」，不重复显示） */
+  undo?: () => void;
 }
 export interface ConsoleStatus {
   level: "ok" | "warn" | "error" | "idle";
@@ -43,21 +45,9 @@ export function OutputConsole(props: {
   /** 因为超出上限被丢掉的更早记录条数 */
   dropped?: number;
   status?: ConsoleStatus;
-  copyEnabled?: boolean;
-  onCopy?: () => Promise<void>;
 }) {
   const bodyRef = useRef<HTMLDivElement>(null);
   const [expanded, setExpanded] = useState(false);
-  const [copying, setCopying] = useState(false);
-  const [copyStatus, setCopyStatus] = useState("");
-  useEffect(() => setCopyStatus(""), [props.lines, props.copyEnabled]);
-  const copy = async () => {
-    if (!props.copyEnabled || !props.onCopy || copying) return;
-    setCopying(true); setCopyStatus("");
-    try { await props.onCopy(); setCopyStatus(t("已复制脱敏诊断信息")); }
-    catch { setCopyStatus(t("复制失败，请重试")); }
-    finally { setCopying(false); }
-  };
   const errorLines = props.lines.filter(l => l.kind === "err");
   const latestErrorId = errorLines[errorLines.length - 1]?.id;
   useEffect(() => { if (latestErrorId !== undefined) setExpanded(true); }, [latestErrorId]);
@@ -88,7 +78,7 @@ export function OutputConsole(props: {
   return (
     <section className={`console ${expanded ? "is-expanded" : "is-compact"}`} aria-label={t("输出")}>
       <div className="console-bar">
-        <span className="console-tab"><span className="console-icon" aria-hidden="true">&gt;_</span>{t("活动记录")}</span>
+        <span className="console-tab"><span className="console-icon" aria-hidden="true">&gt;_</span>{t("诊断日志")}</span>
         <span className="console-tools">
           {props.status && (
             <button type="button" className={`console-btn console-status ${props.status.level}`} title={props.status.title} disabled={!props.status.onClick} onClick={props.status.onClick}>
@@ -100,10 +90,11 @@ export function OutputConsole(props: {
         </span>
       </div>
       <div className="console-body" ref={bodyRef}
-        onScroll={e => { const el = e.currentTarget; atBottom.current = el.scrollHeight - el.clientHeight - el.scrollTop < 24; }}>
+        onScroll={e => { const el = e.currentTarget; atBottom.current = el.scrollHeight - el.clientHeight - el.scrollTop < 24; }}
+        >
         <div role="log" aria-live="polite">
           {!!props.dropped && <div className="console-line info"><span className="console-mark" aria-hidden="true">{MARK.info}</span><span className="console-text">{t("已丢弃更早的 {n} 条记录（最多保留 {max} 条）", { n: props.dropped, max: MAX_LOG_LINES })}</span></div>}
-          {props.lines.length === 0 && <div className="console-line info"><span className="console-mark" aria-hidden="true">{MARK.info}</span><span className="console-text">{t("就绪。保存、写入配置、启动和体检的结果会显示在这里。")}</span></div>}
+          {props.lines.length === 0 && <div className="console-line info"><span className="console-mark" aria-hidden="true">{MARK.info}</span><span className="console-text">{t("还没有记录。")}</span></div>}
           {(expanded ? props.lines : props.lines.slice(-3)).map(l => (
             <div key={l.id} className={`console-line ${l.kind}`}>
               {l.kind !== "path" && <span className="console-time">{l.time}</span>}
@@ -116,12 +107,6 @@ export function OutputConsole(props: {
           ))}
         </div>
       </div>
-      {props.onCopy && <div className="console-export">
-        <button type="button" className="console-btn" disabled={props.busy || !props.copyEnabled || copying}
-          title={t("仅复制体检摘要，不包含密钥、账号信息、本机路径或原始日志。")}
-          onClick={() => void copy()}>{t(copying ? "正在复制…" : "复制脱敏诊断信息")}</button>
-        <span role="status">{copyStatus}</span>
-      </div>}
     </section>
   );
 }

@@ -23,6 +23,8 @@ pub fn auth_path() -> Result<PathBuf> {
     Ok(codex_home()?.join("auth.json"))
 }
 
+pub fn ownership_path() -> Result<PathBuf> { Ok(codex_home()?.join(".starnexus-keytool-ownership.json")) }
+
 /// Claude Code 配置目录。
 /// 同样优先读 CLAUDE_CONFIG_DIR —— 不少用户会改它。
 pub fn claude_home() -> Result<PathBuf> {

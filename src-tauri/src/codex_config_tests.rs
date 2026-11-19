@@ -250,6 +250,21 @@ fn broken_toml_is_rejected() {
 }
 
 #[test]
+fn builtin_route_is_used_from_the_first_verified_version_onward() {
+    for version in ["0.167.0", "0.168.0", "0.169.0", "0.170.0", "0.170.0-alpha.1", "1.2.3"] {
+        assert!(verified_builtin(Some(version)), "{version}");
+        assert_eq!(select_auth_mode(Some(version), false, false), AuthMode::OpenAiBuiltin);
+    }
+    for version in [None, Some("0.100.0"), Some("0.166.9"), Some("0.167.0-alpha.1"), Some("unknown"), Some("0.167")] {
+        assert!(!verified_builtin(version), "{version:?}");
+        assert_eq!(select_auth_mode(version, false, false), AuthMode::BearerToken);
+    }
+    // 兼容选项或需要保留现有认证时，任何版本都用独立 provider
+    assert_eq!(select_auth_mode(Some("0.169.0"), true, false), AuthMode::BearerToken);
+    assert_eq!(select_auth_mode(Some("0.169.0"), false, true), AuthMode::BearerToken);
+}
+
+#[test]
 fn independent_provider_preserves_other_tools_provider() {
     let original = r#"model_provider = "starnexus"
 [model_providers.starnexus]

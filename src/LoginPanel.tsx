@@ -20,13 +20,14 @@ async function openExternal(url: string) {
 type Working = null | "login" | "list" | "import" | "logout" | "browser";
 
 export function LoginPanel(props: {
+  guided?: boolean;
   loggedAs: string | null;
   tokens: GatewayToken[] | null;
   ignoreProxy: boolean;
   busy: boolean;
   onLoggedIn: (user: string, tokens: GatewayToken[]) => void;
   onLogout: () => void | Promise<void>;
-  onImported: (created: string[], updated: string[], unchanged: string[], skipped: string[]) => void | Promise<void>;
+  onImported: (created: string[], updated: string[], unchanged: string[], skipped: string[], profileIds: string[]) => void | Promise<void>;
   onManualKey: () => void;
   onClose: () => void;
 }) {
@@ -119,33 +120,35 @@ export function LoginPanel(props: {
 
   const importKeys = (ids: number[]) => run("import", async () => {
     const result = await api.gatewayImportTokens(ids);
-    await onImported(result.created, result.updated, result.unchanged, result.skipped);
+    await onImported(result.created, result.updated, result.unchanged, result.skipped, result.profileIds);
   });
 
-  const title = t(signedIn ? "选择要导入的密钥" : "登录账号");
-  const lede = t(signedIn ? "导入后，即可在启动页和密钥页选择使用。" : "使用账号密码登录，或前往官网登录后自动返回并导入密钥。");
+  const usable = tokens?.filter(token => token.usable) ?? [];
+  const title = t(signedIn ? props.guided && usable.length === 1 ? "导入密钥" : "选择要导入的密钥" : "登录账号");
+  const lede = props.guided ? "" : t(signedIn ? "导入后，即可在启动页和密钥页选择使用。"
+    : "使用账号密码登录，或前往官网登录后自动返回并导入密钥。");
   const alert = error && <p className="cauth-error" role="alert">{error}</p>;
   const spinner = <span className="account-spinner" />;
   const manual = <button type="button" className="cauth-link" disabled={disabled} onClick={onManualKey}>{t("手动粘贴 API Key")}</button>;
 
   return createPortal(
-    <dialog ref={dialog} className="account-dialog" aria-labelledby={`${id}-title`} aria-describedby={`${id}-lede`}
+    <dialog ref={dialog} className="account-dialog" aria-labelledby={`${id}-title`} aria-describedby={lede ? `${id}-lede` : undefined}
       onCancel={event => { event.preventDefault(); if (!disabled && !requestInFlight.current) onClose(); }}>
       <div className="cauth">
         <button className="cauth-close" aria-label={t("关闭登录导入")} title={t("关闭")} disabled={disabled} onClick={onClose}><UiIcon name="close"/></button>
         <header className="cauth-head">
           <div className="cauth-heading-row"><img className="cauth-logo" src={wordmarkUrl} alt="StarNexus" draggable={false}/><h1 className="cauth-title" id={`${id}-title`}>{title}</h1></div>
-          <p className="cauth-lede" id={`${id}-lede`}>{lede}</p>
+          {lede && <p className="cauth-lede" id={`${id}-lede`}>{lede}</p>}
         </header>
 
         {signedIn ? <div className="cauth-body">
           <div className="account-identity"><span className="account-avatar">{signedIn.slice(0, 1).toUpperCase()}</span><div><strong>{signedIn}</strong><span>{t("已连接 AI 账号")}</span></div><button className="cauth-link" disabled={disabled} onClick={() => void switchAccount()}>{t("切换账号")}</button></div>
-          {tokens === null ? <div className="account-empty"><UiIcon name="refresh"/><strong>{working === "login" || working === "list" ? t("正在读取密钥…") : t("密钥列表尚未加载")}</strong><button className="cauth-link" disabled={disabled} onClick={() => void run("list", () => loadTokens(signedIn))}>{t("重新加载")}</button></div> : tokens.length === 0 ? <div className="account-empty"><UiIcon name="key"/><strong>{t("还没有可导入的密钥")}</strong><p>{t("在开发者控制台创建后，回来刷新列表。")}</p><button className="cauth-link" disabled={disabled} onClick={() => void run("list", () => loadTokens(signedIn))}>{t("刷新列表")}</button></div> : <>
+          {tokens === null ? <div className="account-empty"><UiIcon name="refresh"/><strong>{working === "login" || working === "list" ? t("正在读取密钥…") : t("密钥列表尚未加载")}</strong><button className="cauth-link" disabled={disabled} onClick={() => void run("list", () => loadTokens(signedIn))}>{t("重新加载")}</button></div> : tokens.length === 0 ? <div className="account-empty"><UiIcon name="key"/><strong>{t("还没有可导入的密钥")}</strong><p>{t("在开发者控制台创建后，回来刷新列表。")}</p><button className="cauth-link" disabled={disabled} onClick={() => void run("list", () => loadTokens(signedIn))}>{t("刷新列表")}</button></div> : props.guided ? <div className="account-token-list">{usable.length ? usable.map(token => <button type="button" key={token.id} className="account-token" disabled={disabled} onClick={() => void importKeys([token.id])}><UiIcon name="key"/><strong>{token.name}</strong><span>{t("导入")}</span></button>) : <p>{t("还没有可导入的密钥")}</p>}</div> : <>
             <div className="account-list-heading"><span>{t("{n} 个密钥 · 已选 {picked} 个", { n: tokens.length, picked: picked.size })}</span><button className="cauth-link" disabled={disabled || fresh.length === 0} onClick={() => setPicked(picked.size === fresh.length ? new Set() : new Set(fresh.map(x => x.id)))}>{picked.size === fresh.length && fresh.length > 0 ? t("取消全选") : t("全选可导入项")}</button></div>
             <div className="account-token-list">{tokens.map(token => token.linkedProfile ? <div className="account-token linked" key={token.id}><UiIcon name="check"/><div><strong>{token.name}</strong><span>{token.usable ? t("已关联「{name}」", { name: token.linkedProfile }) : t(token.note || "当前不可用")}</span></div><button className="cauth-link" disabled={disabled || !token.usable} onClick={() => void importKeys([token.id])}>{t("更新")}</button></div> : <label className={`account-token ${picked.has(token.id) ? "selected" : ""} ${token.usable ? "" : "unavailable"}`} key={token.id}><input type="checkbox" checked={picked.has(token.id)} disabled={disabled || !token.usable} onChange={() => setPicked(previous => { const next = new Set(previous); if (next.has(token.id)) next.delete(token.id); else next.add(token.id); return next; })}/><div><strong>{token.name}</strong><span>{t(token.note || "可导入")}</span></div></label>)}</div>
           </>}
           {alert}
-          <button className="cauth-submit primary" disabled={disabled || picked.size === 0} onClick={() => void importKeys([...picked])}>{working === "import" ? <>{spinner}{t("正在导入…")}</> : t("导入选中的 {n} 个密钥", { n: picked.size })}</button>
+          {!props.guided && <button className="cauth-submit primary" disabled={disabled || picked.size === 0} onClick={() => void importKeys([...picked])}>{working === "import" ? <>{spinner}{t("正在导入…")}</> : t("导入选中的 {n} 个密钥", { n: picked.size })}</button>}
         </div>
 
         : <form className="cauth-body" onSubmit={event => { event.preventDefault(); void doLogin(); }}>

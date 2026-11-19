@@ -8,7 +8,7 @@ pub struct ProviderConfig {
     pub provider_id: String,
     pub display_name: String,
     pub base_url: String,
-    /// "responses" —— 已确认 starnexus 网关提供 /v1/responses
+    /// "responses" —— AI API 提供 /v1/responses
     pub wire_api: String,
     pub model: String,
     pub reasoning_effort: String,
@@ -31,6 +31,27 @@ pub enum AuthMode {
 
 /// 旧脚本留下的遗留键，接管时清理掉
 const LEGACY_TOP_LEVEL: &[&str] = &["openai_base_url", "openai_api_key"];
+
+/// 内置 openai provider + 顶层 `openai_base_url` 的写法是否可用于该 CLI 版本。
+/// 实测 0.100.0 会改走官方推理域名，0.167.0、0.169.0 正常；按「不低于 0.167.0」放行，
+/// 避免中间版本和后续自动升级都被当成未验证。版本无法解析时不放行，改用独立 provider。
+pub fn verified_builtin(version: Option<&str>) -> bool {
+    const FIRST_VERIFIED: semver::Version = semver::Version::new(0, 167, 0);
+    version
+        .and_then(|v| semver::Version::parse(v.trim()).ok())
+        .is_some_and(|v| v.cmp_precedence(&FIRST_VERIFIED).is_ge())
+}
+
+pub fn select_auth_mode(version: Option<&str>, independent: bool, preserve_auth: bool) -> AuthMode {
+    if independent || preserve_auth || !verified_builtin(version) { AuthMode::BearerToken } else { AuthMode::OpenAiBuiltin }
+}
+
+pub fn has_builtin_relay(text: &str) -> bool {
+    parse(text).ok().is_some_and(|doc| {
+        doc.get("model_provider").and_then(|item| item.as_str()).unwrap_or("openai") == "openai"
+            && doc.get("openai_base_url").and_then(|item| item.as_str()).is_some_and(|url| url.trim_end_matches('/') != "https://api.openai.com/v1")
+    })
+}
 
 pub fn parse(config_text: &str) -> Result<DocumentMut> {
     config_text
@@ -132,6 +153,8 @@ pub fn apply(config_text: &str, cfg: &ProviderConfig, cleanup: bool) -> Result<S
         tbl.remove("env_key");
         tbl.remove("env_key_instructions");
         tbl.remove("requires_openai_auth");
+        tbl.remove("auth");
+        tbl.remove("gateway_oauth");
     }
 
     let out = doc.to_string();

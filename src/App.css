@@ -436,7 +436,7 @@ code {
 }
 
 
-/* ——— 顶部应用切换栏（cc-switch 式）——— */
+/* ——— 顶部应用切换栏——— */
 .tabs {
   display: flex;
   gap: 4px;

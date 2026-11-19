@@ -36,6 +36,7 @@ impl BrowserLogin {
 }
 #[tauri::command]
 pub async fn gateway_browser_login_start(pending: tauri::State<'_, BrowserLogin>, ignore_proxy: bool) -> Result<String> {
+    crate::updates::ensure_supported()?;
     let client = crate::api::client(ignore_proxy)?;
     let response = client.get(format!("{}/api/desktop/config", brand::SITE)).send().await.map_err(|_| AppError::Other("无法连接官网登录服务".into()))?;
     let config: serde_json::Value = response.json().await.map_err(|_| AppError::Other("官网登录服务尚未更新，请先使用账号密码登录".into()))?;
@@ -46,6 +47,7 @@ pub async fn gateway_browser_login_start(pending: tauri::State<'_, BrowserLogin>
 pub fn gateway_browser_login_cancel(pending: tauri::State<'_, BrowserLogin>) { pending.cancel(); }
 #[tauri::command]
 pub async fn gateway_browser_login_finish(sessions: tauri::State<'_, gateway::SessionState>, pending: tauri::State<'_, BrowserLogin>, code: String, state: String, ignore_proxy: bool) -> Result<gateway::LoginResult> {
+    crate::updates::ensure_supported()?;
     if code.len()!=43 || !code.bytes().all(|b| b.is_ascii_alphanumeric() || b==b'-' || b==b'_') { return Err(AppError::Other("登录授权码无效".into())); }
     let verifier = pending.take(&state)?;
     sessions.reset();

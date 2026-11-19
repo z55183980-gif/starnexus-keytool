@@ -6,27 +6,35 @@ import type {
   Environment,
   GatewayToken,
   Profile,
-  RemoteConfig,
   LaunchMode,
   ToolId,
   KeyStatus,
+  LaunchRequest,
+  LaunchTarget,
   ModelInfo,
 } from "./types";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { ClaudeIcon, CodexIcon } from "./BrandIcons";
+import type { ImportDialog } from "./ConnectionGuide";
 import { LoginPanel } from "./LoginPanel";
+import { WelcomeGuide } from "./WelcomeGuide";
+import { ConfirmDialog, DESKTOP_NAME, RestartDialog, mergePrompt, type RestartPrompt } from "./RestartDialog";
+import type { ApplyKey, ApplyOutcome } from "./ConnectStep";
+import { ONBOARDED_KEY, needsOnboarding } from "./onboarding";
 import logoUrl from "./assets/logo.png";
 import { BRAND } from "./brand";
 import { Launcher, PickerDialog, type Page, type ToolAlerts } from "./Launcher";
 import { UiIcon } from "./UiIcon";
 import { MAX_LOG_LINES, clipLogText, type LogAction, type LogKind, type LogLine } from "./OutputConsole";
 import { effortLabel, pickModel } from "./modelFamilies";
-import { launchWithConfiguration } from "./launchFlow";
+import { launchWithConfiguration, saveLaunchConfiguration } from "./launchFlow";
 import { profileServiceUrl, serviceUrlFields } from "./serviceUrl";
 import { t, useLang } from "./i18n";
+import { UpdateBanner, useUpdates } from "./Updates";
 import "./App.css";
 import "./Launcher.css";
 import "./LiquidGlass.css";
+import "./Repair.css";
 
 // value 是 Codex 认的英文值，label 是给用户看的。
 // 源码里还有 none/max/ultra/persistent，但 none 会被网关过滤掉，
@@ -103,16 +111,16 @@ const emptyDraft = (): Draft => ({
 });
 
 const LAST_TOOL_KEY = "starnexus.lastToolPage";
-const NAV_PAGES: Page[] = ["claude", "codex", "keys", "settings"];
-/** 打开 App 时进入上次停留的页面；第一次打开默认进入密钥 */
+const NAV_PAGES = ["claude", "codex", "keys", "settings"] as const;
 function initialPage(): Page {
   try {
     const saved = localStorage.getItem(LAST_TOOL_KEY);
-    return saved && NAV_PAGES.includes(saved as Page) ? saved as Page : "keys";
-  } catch { return "keys"; }
+    return NAV_PAGES.find(item => item === saved) ?? "welcome";
+  } catch { return "welcome"; }
 }
 
 export default function App() {
+  const updates = useUpdates();
   // 切换语言时整棵界面重新渲染；窗口标题也跟着换
   const lang = useLang();
   useEffect(() => {
@@ -121,6 +129,9 @@ export default function App() {
     api.setUiLanguage(lang).catch(() => {});
   }, [lang]);
   const [page, setPageState] = useState<Page>(initialPage);
+  /** 首次打开的引导；完成或跳过后记下，之后不再出现 */
+  const [onboarding, setOnboarding] = useState(() => { try { return needsOnboarding(localStorage, location.search); } catch { return false; } });
+  const finishOnboarding = () => { try { localStorage.setItem(ONBOARDED_KEY, "1"); } catch { /* 记不住下次再看一遍也无妨 */ } setOnboarding(false); };
   const setPage = (next: Page) => {
     setPageState(next);
     try { localStorage.setItem(LAST_TOOL_KEY, next); } catch { /* 记不住也不影响使用 */ }
@@ -130,7 +141,7 @@ export default function App() {
   const launchLock = useRef(false);
 
   const [env, setEnv] = useState<Environment | null>(null);
-  const [remote, setRemote] = useState<RemoteConfig | null>(null);
+  const remote = updates.state.policy!.config;
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [backups, setBackups] = useState<BackupEntry[]>([]);
   const [scanError, setScanError] = useState<string | null>(null);
@@ -163,13 +174,16 @@ export default function App() {
   /** 上一次写进输出的同步结果，相同就不重复写 */
   const lastSync = useRef("");
 
+  const [guideWorking, setGuideWorking] = useState(false);
   const [busy, setBusy] = useState<Busy>(null);
+  useEffect(() => { updates.setBusy(busy !== null || guideWorking); return () => updates.setBusy(false); }, [busy, guideWorking, updates.setBusy]);
+  useEffect(() => { updates.setIgnoreProxy(ignoreProxy); }, [ignoreProxy, updates.setIgnoreProxy]);
   /** 输出面板的记录（本次运行期间，最多保留 MAX_LOG_LINES 行） */
   const [logs, setLogs] = useState<LogLine[]>([]);
   const logId = useRef(0);
   const logBatch = useRef(0);
   /** 写一行输出。extra.group + batch：同一组里只有最新一批的行尾按钮可点 */
-  const log = useCallback((kind: LogKind, text: string, extra?: { group?: string; batch?: number; actions?: LogAction[] }) => {
+  const log = useCallback((kind: LogKind, text: string, extra?: { group?: string; batch?: number; actions?: LogAction[]; undo?: () => void }) => {
     // id 在更新函数外面生成：开发模式下更新函数会被调用两次，不能在里面自增
     const line: LogLine = { id: ++logId.current, time: new Date().toLocaleTimeString("zh-CN", { hour12: false }), kind, text: clipLogText(text), ...extra };
     setLogs(l => [...l, line].slice(-MAX_LOG_LINES));
@@ -182,12 +196,30 @@ export default function App() {
   const droppedLogs = logs.length ? logs[0].id - 1 - clearedUpTo.current : 0;
   /** 原来的提示条接口：现在写进输出面板；传 null 不再需要清空 */
   // 后端返回的固定提示也在译文表里，这里统一过一遍 t()；动态内容查不到就原样显示
-  const setToast = useCallback((m: { kind: "ok" | "err"; text: string } | null) => { if (m) log(m.kind, t(m.text.replace(/^Error:\s*/, ""))); }, [log]);
+  /** 最近一条错误提示：引导页没有输出面板，写入失败时拿它告诉用户原因 */
+  const lastError = useRef("");
+  const setToast = useCallback((m: { kind: "ok" | "err"; text: string } | null) => { if (m) { const text = t(m.text.replace(/^Error:\s*/, "")); if (m.kind === "err") lastError.current = text; log(m.kind, text); } }, [log]);
+  /** 写入后的弹窗：运行中的桌面版要重启才读新配置 */
+  const [restartPrompt, setRestartPrompt] = useState<RestartPrompt | null>(null);
+  const promptRestart = useCallback(async (targets: LaunchTarget[]) => {
+    const running = targets.length ? await api.runningDesktopClients(targets).catch(() => [] as LaunchTarget[]) : [];
+    if (running.length) setRestartPrompt(prev => mergePrompt(prev, { targets: running }));
+  }, []);
+  /** 通用确认弹窗：返回用户是否确认 */
+  type ConfirmAsk = { title: string; body: string; note?: string; confirmLabel: string; resolve: (ok: boolean) => void };
+  const [confirmAsk, setConfirmAsk] = useState<ConfirmAsk | null>(null);
+  const confirm = (ask: Omit<ConfirmAsk, "resolve">) => new Promise<boolean>(resolve => setConfirmAsk({ ...ask, resolve }));
   /** 写入配置的结果：写了哪些文件、备份号（可撤销）、警告 */
   const logResult = (r: ApplyResult) => {
     log("ok", t("配置已写入，改动前已备份（{id}）", { id: r.backupId }), { group: "undo", batch: nextBatch(), actions: [{ label: t("撤销这次改动"), run: () => void restore(r.backupId) }] });
     r.paths.forEach(path => log("path", path));
     r.warnings.forEach(w => log("warn", t(w)));
+    // Claude 桌面版选了官方登录时重启也还是官方登录，留到用 API 启动时再确认切换
+    const targets: LaunchTarget[] = [
+      ...(r.wroteClaudeDesktop && !r.officialLoginChosen ? ["claude-desktop" as const] : []),
+      ...(r.wroteCodexConfig || r.wroteCodexAuth ? ["codex-desktop" as const] : []),
+    ];
+    void promptRestart(targets);
   };
 
   const codexKeepsAuth = env?.codex.authState === "OfficialLogin" || env?.codex.authState === "ExternalStore";
@@ -198,12 +230,12 @@ export default function App() {
    */
   /** 是否已同意读取本机配置（给 reload 用的同步副本） */
   const configReadRef = useRef<Record<ToolId, boolean>>({ claude: false, codex: false });
-  const reload = useCallback(async (url?: string): Promise<Environment | null> => {
+  const reload = useCallback(async (url?: string, preferredProfileId?: string): Promise<Environment | null> => {
     // 只读用户同意过的工具；一个都没同意时不读本机配置，只读本工具自己的数据
     const tools = (["claude", "codex"] as const).filter(x => configReadRef.current[x]);
     try {
       const [e, ps, bs] = await Promise.all([
-        tools.length ? api.scanEnvironment(url, [...tools]) : Promise.resolve(null),
+        tools.length ? api.scanEnvironment(url, [...tools], preferredProfileId) : Promise.resolve(null),
         api.listProfiles(),
         api.listBackups().catch(() => [] as BackupEntry[]),
       ]);
@@ -238,8 +270,7 @@ export default function App() {
         setCleanup(st.cleanupResidue ?? true);
       }
 
-      const rc = await api.getRemoteConfig(st?.ignoreProxy ?? false);
-      setRemote(rc);
+      const rc = remote;
       setBaseUrl(rc.base_url);
       setAliasOpus(rc.claude_opus_model);
       setAliasSonnet(rc.claude_sonnet_model);
@@ -247,10 +278,11 @@ export default function App() {
 
       // 首次使用（没有同意记录、也没有用过的痕迹）先不读本机配置，等用户在工具页点「读取」；
       // 老用户（已经有密钥或写过配置）直接读取，和以前一样
-      const legacy = !!st && (st.configReadConsent || st.profiles.length > 0 || !!st.lastConfiguredAt);
+      const legacy = !!st && !st.configReadTools?.length && (st.configReadConsent || st.profiles.length > 0 || !!st.lastConfiguredAt);
       const consent = { claude: legacy || !!st?.configReadTools?.includes("claude"), codex: legacy || !!st?.configReadTools?.includes("codex") };
       configReadRef.current = consent;
       setConfigRead(consent);
+      if (consent.claude || consent.codex) setPageState(current => current !== "welcome" ? current : consent.codex ? "codex" : "claude");
       await reload(rc.base_url);
     })();
   }, [reload]);
@@ -381,8 +413,8 @@ export default function App() {
 
   // —————— 启用 ——————
 
-  /** 把一把密钥写进某个工具的用户配置（不启动客户端） */
-  const enable = async (profileId: string, tool: AppId, rebuild = false, desktop = false): Promise<boolean> => {
+  /** 把一把密钥写进某个工具的用户配置（不启动客户端）。成功返回这次改动的备份号，可用来撤销 */
+  const enable = async (profileId: string, tool: AppId, rebuild = false, desktop = false): Promise<string | null> => {
     const p = profiles.find((x) => x.id === profileId);
     const claudeAliases = p?.custom
       ? { opus: "", sonnet: "", haiku: "" }
@@ -396,6 +428,7 @@ export default function App() {
         wireApi: remote?.wire_api || "responses",
         ignoreProxy,
         configureCodex: tool === "codex",
+        codexDesktop: tool === "codex" && desktop,
         model: modelFor("codex", p),
         reasoningEffort: p?.codexEffort || "medium",
         cleanupResidue: cleanup,
@@ -415,47 +448,94 @@ export default function App() {
         text: t("{tool} 已改用「{name}」；请重新打开客户端，实际连接尚未验证", { tool: APP_META[tool].name, name: p?.name ?? t("所选密钥") }),
       });
       await reload(baseUrl);
-      return true;
+      return r.backupId;
     } catch (e) {
       setToast({ kind: "err", text: String(e) });
-      return false;
+      return null;
     } finally {
       setBusy(null);
     }
   };
 
-  const launch = async (tool: ToolId, mode: LaunchMode, service: string, directory: string): Promise<boolean> => {
+  /**
+   * 打开桌面版（配置已核对过）。桌面版只在启动时读配置：
+   * 用 API 启动而 Claude 桌面版选了官方登录 → 确认后切到第三方推理并重新打开；
+   * 已在运行 → 确认后重启（否则只会激活旧窗口，看起来没反应）；都不是就直接打开。
+   */
+  const launchDesktop = async (tool: ToolId, service: string, req: LaunchRequest): Promise<{ message: string }> => {
+    const name = t(DESKTOP_NAME[req.target] ?? req.target);
+    const usesApi = tool === "claude" && service !== "official" && (service !== "current" || !!env?.claudeDesktop?.currentBaseUrl);
+    if (usesApi && await api.claudeDesktopOfficialLogin().catch(() => false)) {
+      const ok = await confirm({
+        title: t("切换为 API 启动？"),
+        body: t("Claude 桌面版当前使用官方账号登录，切换后将重启。"),
+        note: t("进行中的对话会被中断，可随时切回官方登录。"),
+        confirmLabel: t("切换并启动"),
+      });
+      if (!ok) return { message: t("已取消启动") };
+      const r = await api.switchClaudeDesktopToThirdParty();
+      const backupId = r.backupId;
+      if (backupId) log("ok", t("已把 Claude 桌面版切换到第三方推理（{id}）", { id: backupId }), { group: "undo", batch: nextBatch(), actions: [{ label: t("撤销这次改动"), run: () => void restore(backupId) }] });
+      return { message: t(r.message) };
+    }
+    if ((await api.runningDesktopClients([req.target]).catch(() => [] as LaunchTarget[])).length) {
+      const ok = await confirm({
+        title: t("重启 {names}？", { names: name }),
+        body: t("{name} 正在运行，重启后才会使用所选服务。", { name }),
+        note: t("进行中的对话会被中断。"),
+        confirmLabel: t("立即重启"),
+      });
+      if (!ok) return { message: t("已取消启动") };
+      return api.restartDesktopClient(req.target);
+    }
+    return api.launchClient(req);
+  };
+
+  /** fresh：刚保存过的密钥（如换模型后），避免用到本次渲染里还没更新的 profiles */
+  const runClientAction = async (tool: ToolId, mode: LaunchMode, service: string, directory: string, action: "save" | "launch", fresh?: Profile): Promise<boolean> => {
     if (launchLock.current || busy) return false;
     launchLock.current = true;
-    setBusy("launch");
+    setBusy(action === "save" ? "apply" : "launch");
     let changed = false;
     try {
-      const p = profiles.find(profile => profile.id === service);
+      const p = fresh?.id === service ? fresh : profiles.find(profile => profile.id === service);
       const claudeAliases = p?.custom
         ? { opus: "", sonnet: "", haiku: "" }
         : { opus: aliasOpus, sonnet: aliasSonnet, haiku: aliasHaiku };
-      log("cmd", t("启动 {name}", { name: `${tool === "claude" ? "Claude" : "Codex"} ${mode === "cli" ? "CLI" : t("桌面版")}` }) + ` · ${service === "current" ? t("保持现有配置") : service === "official" ? t("官方服务") : p?.name ?? t("所选密钥")}`);
+      log("cmd", t(action === "save" ? "保存并写入 {name} 配置" : "启动 {name}", { name: `${tool === "claude" ? "Claude" : "Codex"} ${mode === "cli" ? "CLI" : t("桌面版")}` }) + ` · ${service === "current" ? t("当前配置") : service === "official" ? t("官方服务") : p?.name ?? t("所选密钥")}`);
       if (!["current", "official"].includes(service) && !p?.hasKey) throw new Error(t("所选密钥不可用，请重新选择"));
-      const receipt = await launchWithConfiguration(tool, mode, service, directory, {
+      const request = {
         profileId: service,
         baseUrl: baseUrl || remote?.base_url || BRAND.apiBaseUrl,
         wireApi: remote?.wire_api || "responses", ignoreProxy,
         configureCodex: tool === "codex", configureClaude: tool === "claude",
         model: modelFor("codex", p), reasoningEffort: p?.codexEffort || "medium",
-        cleanupResidue: false, overwriteOfficialAuth: false, conservative: false,
+        cleanupResidue: false, overwriteOfficialAuth: false, conservative,
         claudeModel: modelFor("claude", p),
         claudeOpusModel: claudeAliases.opus, claudeSonnetModel: claudeAliases.sonnet, claudeHaikuModel: claudeAliases.haiku,
-      }, api, r => { changed = true; logResult(r); });
-      setToast({ kind: "ok", text: receipt.message });
+      };
+      if (action === "save") {
+        let backupId = "";
+        await saveLaunchConfiguration(tool, mode, service, request, api, r => { changed = true; backupId = r.backupId; logResult(r); });
+        // 真的改了配置才给撤销：提示条上倒计时 5 秒，期间可以一键还原到写入前
+        log("ok", t("配置已保存并写入，可以启动客户端"), backupId ? { undo: () => void restore(backupId) } : undefined);
+      } else {
+        const receipt = await launchWithConfiguration(tool, mode, service, directory, request,
+          mode === "desktop" ? { ...api, launchClient: req => launchDesktop(tool, service, req) } : api);
+        setToast({ kind: "ok", text: receipt.message });
+      }
       return true;
     } catch (e) {
       setToast({ kind: "err", text: t(String(e).replace(/^Error:\s*/, "")) + (changed ? t("（配置已保存，可在上方撤销；尚未确认客户端运行）") : "") });
       return false;
     } finally {
-      await reload(baseUrl);
+      await reload(baseUrl, service);
       setBusy(null); launchLock.current = false;
     }
   };
+
+  const launch = (tool: ToolId, mode: LaunchMode, service: string, directory: string) => runClientAction(tool, mode, service, directory, "launch");
+  const saveConfiguration = (tool: ToolId, mode: LaunchMode, service: string) => runClientAction(tool, mode, service, "", "save");
 
   /**
    * 某把密钥给某个工具用的模型：单独设置过就用它；没设置时用默认模型，
@@ -488,18 +568,19 @@ export default function App() {
     const model = p ? modelFor(tool, p) : "";
     return api.healthCheck({ tool, mode, service, model, baseUrl: baseUrl || remote?.base_url || BRAND.apiBaseUrl, ignoreProxy, opusModel: aliasOpus, sonnetModel: aliasSonnet, haikuModel: aliasHaiku });
   };
-  const fixHealth = async (tool: ToolId, profileId: string | null, fix: "rewrite" | "rebuild" | "keys" | "settings", mode: LaunchMode = "cli"): Promise<boolean> => {
-    if (fix === "rebuild" && tool !== "codex") {
-      setToast({ kind: "err", text: t("重建配置仅支持 Codex") });
-      return false;
+  /** 体检 / AI 修复的动作。写入了配置时返回备份号（可撤销），其余（跳转页面、没写入）返回 null */
+  const fixHealth = async (tool: ToolId, profileId: string | null, fix: "rewrite" | "rebuild" | "keys" | "settings", mode: LaunchMode = "cli"): Promise<string | null> => {
+    if (fix === "rebuild" && tool === "claude" && mode === "desktop") {
+      setToast({ kind: "err", text: t("桌面版不支持备份重建，请手动修复配置") });
+      return null;
     }
-    if (fix === "keys") { setPage("keys"); return false; }
-    if (fix === "settings") { setShowAdvanced(true); return false; }
+    if (fix === "keys") { setPage("keys"); return null; }
+    if (fix === "settings") { setShowAdvanced(true); return null; }
     if (profileId && !busy) return enable(profileId, tool, fix === "rebuild", tool === "claude" && mode === "desktop");
-    return false;
+    return null;
   };
 
-  const restore = async (id: string) => {
+  const restore = async (id: string): Promise<boolean> => {
     setBusy("restore");
     try {
       log("cmd", `${t("还原配置")} · ${id}`);
@@ -507,27 +588,8 @@ export default function App() {
       setLogs(l => l.map(x => x.group === "undo" ? { ...x, actions: undefined } : x));
       setToast({ kind: "ok", text: t("已还原到 {id} 那一次的配置", { id }) });
       await reload(baseUrl);
-    } catch (e) {
-      setToast({ kind: "err", text: String(e) });
-    } finally {
-      setBusy(null);
-    }
-  };
-
-  /** 工具页「更换模型」：只改这把密钥给某个工具用的模型，Key 和名称不动 */
-  const saveModel = async (id: string, patch: { claudeModel?: string; codexModel?: string; codexEffort?: string }) => {
-    const p = profiles.find(x => x.id === id);
-    if (!p) return false;
-    setBusy("save");
-    log("cmd", `${t("更换模型")} · ${p.name} → ${patch.claudeModel ?? patch.codexModel ?? ""}${patch.codexEffort ? t("（思考深度 {effort}）", { effort: effortLabel(patch.codexEffort) }) : ""}`);
-    try {
-      await api.saveProfile({
-        id, name: p.name, apiKey: "",
-        codexModel: p.codexModel, codexEffort: p.codexEffort || "medium", claudeModel: p.claudeModel,
-        ...patch,
-      });
-      setProfiles(await api.listProfiles().catch(() => profiles));
-      setToast({ kind: "ok", text: t("模型已保存，启动时写入配置") });
+      // 还原可能改了任一客户端的配置：运行中的桌面版同样要重启
+      void promptRestart(["claude-desktop", "codex-desktop"]);
       return true;
     } catch (e) {
       setToast({ kind: "err", text: String(e) });
@@ -536,14 +598,44 @@ export default function App() {
       setBusy(null);
     }
   };
-  /** 把配置文件里正在用的 AI 密钥收进密钥列表 */
-  const adoptKey = async (tool: ToolId) => {
+
+  /** 工具页「更换模型」：只改这把密钥给某个工具用的模型，Key 和名称不动 */
+  const saveModel = async (id: string, patch: { claudeModel?: string; codexModel?: string; codexEffort?: string }, apply?: { tool: ToolId; mode: LaunchMode }) => {
+    const p = profiles.find(x => x.id === id);
+    if (!p) return false;
+    setBusy("save");
+    log("cmd", `${t("更换模型")} · ${p.name} → ${patch.claudeModel ?? patch.codexModel ?? ""}${patch.codexEffort ? t("（思考深度 {effort}）", { effort: effortLabel(patch.codexEffort) }) : ""}`);
+    try {
+      await api.saveProfile({
+        id, name: p.name, apiKey: "",
+        codexModel: p.codexModel, codexEffort: p.codexEffort || "medium", claudeModel: p.claudeModel,
+        codexBaseUrl: p.codexBaseUrl, claudeBaseUrl: p.claudeBaseUrl,
+        ...patch,
+      });
+      const list = await api.listProfiles().catch(() => profiles);
+      setProfiles(list);
+      // 这把密钥正在生效时，换完模型直接写入配置，不需要再手动「启用」
+      if (apply) {
+        setBusy(null);
+        return await runClientAction(apply.tool, apply.mode, id, "", "save", list.find(x => x.id === id));
+      }
+      setToast({ kind: "ok", text: t("模型选择已保存") });
+      return true;
+    } catch (e) {
+      setToast({ kind: "err", text: String(e) });
+      return false;
+    } finally {
+      setBusy(null);
+    }
+  };
+  /** 把配置文件里正在用、没保存在本工具的密钥（AI 或第三方）加入密钥列表 */
+  const adoptKey = async (tool: ToolId, desktop = false) => {
     if (busy) return;
     setBusy("save");
-    log("cmd", `${t("收进密钥列表")} · ${t("{tool} 配置里的密钥", { tool: tool === "claude" ? "Claude" : "Codex" })}`);
+    log("cmd", `${t("加入密钥")} · ${t("{tool} 配置里的密钥", { tool: tool === "claude" ? (desktop ? t("{name} 桌面版", { name: "Claude" }) : "Claude") : "Codex" })}`);
     try {
-      const r = await api.adoptCurrentKey(tool, baseUrl || remote?.base_url || BRAND.apiBaseUrl, ignoreProxy);
-      log("ok", r.existed ? t("这把密钥已经在列表里：「{name}」", { name: t(r.name) }) : t("已收进密钥列表：「{name}」，测试可用", { name: t(r.name) }));
+      const r = await api.adoptCurrentKey(tool, baseUrl || remote?.base_url || BRAND.apiBaseUrl, ignoreProxy, desktop);
+      log("ok", r.existed ? t("这把密钥已经在列表里：「{name}」", { name: t(r.name) }) : t("已加入密钥列表：「{name}」，测试可用", { name: t(r.name) }));
       await reload(baseUrl);
     } catch (e) {
       log("err", t(String(e).replace(/^Error:\s*/, "")));
@@ -558,6 +650,52 @@ export default function App() {
     return list;
   };
 
+  const testProfile = async (profile: Profile) => {
+    if (busy || !profile.hasKey) return;
+    setBusy("fetch");
+    try {
+      const models = await listModels(profile.id);
+      log("ok", t("{name}：已读取模型列表（{n} 个）", { name: profile.name, n: models.length }));
+    } catch (error) {
+      log("err", t("{name}：测试失败 · {error}", { name: profile.name, error: t(String(error).replace(/^Error:\s*/, "")) }));
+    } finally { setBusy(null); }
+  };
+
+  const loginPanel = (ready?: Parameters<ImportDialog>[0], close = () => setShowLogin(false), manual = () => { close(); setPage("keys"); startEdit(); }) => (
+    <LoginPanel
+      guided={!!ready}
+      loggedAs={loggedAs}
+      tokens={tokens}
+      ignoreProxy={ignoreProxy}
+      busy={busy !== null}
+      onLoggedIn={(u, list) => {
+        setLoggedAs(u);
+        setTokens(list);
+        void syncKeyStatus(u);
+      }}
+      onLogout={doLogout}
+      onImported={async (created, updated, unchanged, skipped, profileIds) => {
+        const list = await api.listProfiles();
+        setProfiles(list);
+        if (ready) {
+          const profile = list.find(item => profileIds.includes(item.id) && item.hasKey);
+          if (!profile) throw new Error(t("导入失败，请重试"));
+          ready(profile.id); return;
+        }
+        void syncKeyStatus();
+        const parts: string[] = [];
+        if (created.length) parts.push(t("新增 {n} 个密钥", { n: created.length }));
+        if (updated.length) parts.push(t("更新 {n} 个", { n: updated.length }));
+        if (unchanged.length) parts.push(t("{n} 个没有变化", { n: unchanged.length }));
+        if (skipped.length) parts.push(t("{n} 个取不到，跳过", { n: skipped.length }));
+        setToast({ kind: "ok", text: parts.join(t("，")) || t("没有可导入的") });
+        setShowLogin(false);
+      }}
+      onManualKey={manual}
+      onClose={close}
+    />
+  );
+
   /** 某把密钥正被哪些工具使用（只读标记；切换在页面顶部的「正在使用」里做） */
   const usedBy = (profileId: string) =>
     TOOL_ORDER.filter((tool) => env?.[tool].activeProfileId === profileId).map((tool) => {
@@ -570,18 +708,48 @@ export default function App() {
       );
     });
 
+  /** 引导最后一步：先记下同意读取这些工具的本机配置，再逐个形态写入（各自备份）；一个失败不影响其他 */
+  const applyGuideKey: ApplyKey = async (targets, profileId) => {
+    await readConfig(targets.map(item => item.tool));
+    const list = await api.listProfiles(); setProfiles(list);
+    const profile = list.find(item => item.id === profileId);
+    const outcome: ApplyOutcome[] = [];
+    for (const { tool, modes } of targets) {
+      let ok = true, error = "";
+      for (const mode of modes) {
+        lastError.current = "";
+        if (!await runClientAction(tool, mode, profileId, "", "save", profile)) { ok = false; error = lastError.current; break; }
+      }
+      outcome.push({ tool, ok, error });
+    }
+    return outcome;
+  };
+  const restartDialog = <>
+    {restartPrompt && <RestartDialog prompt={restartPrompt} onClose={() => setRestartPrompt(null)} log={(kind, text) => setToast({ kind: kind === "info" ? "ok" : kind, text })} />}
+    {confirmAsk && <ConfirmDialog title={confirmAsk.title} body={confirmAsk.body} note={confirmAsk.note}
+      cancelLabel={t("取消")} confirmLabel={confirmAsk.confirmLabel} workingLabel={confirmAsk.confirmLabel}
+      onCancel={() => { confirmAsk.resolve(false); setConfirmAsk(null); }}
+      onConfirm={async () => { confirmAsk.resolve(true); setConfirmAsk(null); }} />}
+  </>;
+  if (onboarding) return <>
+    <WelcomeGuide onFinish={tools => { finishOnboarding(); setPage(tools[0]); }} onSkip={finishOnboarding}
+      connect={{ profiles, defaultUrl: defaultServiceUrl, ignoreProxy, renderImport: loginPanel, applyKey: applyGuideKey, readEnvironment: () => readConfig(["claude", "codex"]), checkHealth }} />
+    {restartDialog}
+  </>;
+
   return (
     <div className="launcher-app">
       <div className="workspace-shell">
+      <UpdateBanner />
       <nav className="workspace-nav" aria-label={t("主导航")}>
         <div className="nav-pill liquid-glass">
-          <span className="nav-lens" aria-hidden="true" style={{ transform: `translateX(${NAV_PAGES.indexOf(page) * 100}%)` }} />
+          {page !== "welcome" && <span className="nav-lens" aria-hidden="true" style={{ transform: `translateX(${NAV_PAGES.indexOf(page) * 100}%)` }} />}
           {NAV_PAGES.map(id => {
             const label = { claude: "Claude", codex: "Codex", keys: t("密钥"), settings: t("设置") }[id];
             const alert = id === "claude" || id === "codex" ? toolAlerts[id] : undefined;
             const name = id === "keys" && profiles.length ? `${label}（${profiles.length}）`
               : alert ? `${label}（${alert === "error" ? t("有问题") : t("有提醒")}）` : label;
-            return <button key={id} className="nav-tab" aria-label={name} aria-current={page === id ? "page" : undefined} disabled={busy !== null} onClick={() => { setPage(id); document.querySelector(".workspace-main")?.scrollTo({ top: 0 }); }}>
+            return <button key={id} className="nav-tab" aria-label={name} aria-current={page === id ? "page" : undefined} disabled={busy !== null || guideWorking} onClick={() => { setPage(id); document.querySelector(".workspace-main")?.scrollTo({ top: 0 }); }}>
               <span className="nav-icon">
                 {id === "claude" ? <ClaudeIcon className="brand brand-claude"/> : id === "codex" ? <CodexIcon className="brand brand-codex"/> : <UiIcon name={id === "keys" ? "key" : "settings"}/>}
                 {id === "keys" && profiles.length > 0 && <span className="nav-badge" aria-hidden="true">{profiles.length}</span>}
@@ -599,12 +767,14 @@ export default function App() {
       {/* 导航独占布局区域，只有主内容滚动，短窗口也不会遮挡操作。 */}
       <main className={`workspace-main ${page === "claude" || page === "codex" ? "fill" : ""}`}>
       <Launcher page={page} busy={busy !== null} profiles={profiles} env={env}
-        onLaunch={launch} onKeys={() => setPage("keys")}
+        onEditProfile={startEdit} onTestProfile={testProfile}
+        onLaunch={launch} onSaveConfiguration={saveConfiguration} onKeys={() => setPage("keys")}
         onSettings={() => setPage("settings")} onAdvanced={() => setShowAdvanced(true)}
-        onRefresh={async () => { await reload(baseUrl); }} checkHealth={checkHealth} onFix={fixHealth} onAlerts={setToolAlerts} onConsole={openSite}
+        onRefresh={async () => { await reload(baseUrl); }} checkHealth={checkHealth} onFix={fixHealth} onRestore={restore} onAlerts={setToolAlerts} onConsole={openSite}
         modelFor={modelFor} catalogKey={Object.keys(catalogs).join()} onSaveModel={saveModel} listModels={listModels}
         logs={logs} log={log} nextBatch={nextBatch} onClearLogs={clearLogs} droppedLogs={droppedLogs} onPage={setPage} onAdopt={adoptKey}
-        onLoginImport={() => { setPage("keys"); setShowLogin(true); }} onManualKey={() => { setPage("keys"); startEdit(); }}
+        onLoginImport={() => { setPage("keys"); setShowLogin(true); }} renderImport={loginPanel} defaultUrl={defaultServiceUrl} ignoreProxy={ignoreProxy} onGuideWorking={setGuideWorking} guideWorking={guideWorking}
+        onGuideApply={async (tool, mode, id) => { const list = await api.listProfiles(); setProfiles(list); return runClientAction(tool, mode, id, "", "save", list.find(profile => profile.id === id)); }}
         configRead={configRead} onReadConfig={readConfig} />
       {(page === "claude" || page === "codex") && scanError && <div className="toast err" role="alert">{t("配置读取失败：{error}", { error: t(scanError) })}</div>}
       {page === "keys" && <div className="key-workspace">
@@ -641,51 +811,7 @@ export default function App() {
       })}
       </section>}
 
-      {/* 编辑 / 新建：弹窗 */}
-      {draft && (() => {
-        const editingProfile = draft.id ? profiles.find(p => p.id === draft.id) : undefined;
-        return (
-          <Editor
-            title={editingProfile ? t("编辑「{name}」", { name: editingProfile.name }) : t("添加密钥")}
-            hint={editingProfile ? undefined : t("保存后在 Claude / Codex 页面选用，模型也在那里设置")}
-            draft={draft}
-            defaultServiceUrl={defaultServiceUrl}
-            setDraft={setDraft}
-            busy={busy}
-            onCancel={() => setDraft(null)}
-            onSave={saveDraft}
-            onDelete={editingProfile ? () => removeProfile(editingProfile) : undefined}
-          />
-        );
-      })()}
-
-      {showLogin && (
-        <LoginPanel
-          loggedAs={loggedAs}
-          tokens={tokens}
-          ignoreProxy={ignoreProxy}
-          busy={busy !== null}
-          onLoggedIn={(u, list) => {
-            setLoggedAs(u);
-            setTokens(list);
-            void syncKeyStatus(u);
-          }}
-          onLogout={doLogout}
-          onImported={async (created, updated, unchanged, skipped) => {
-            setProfiles(await api.listProfiles().catch(() => profiles));
-            void syncKeyStatus();
-            const parts: string[] = [];
-            if (created.length) parts.push(t("新增 {n} 个密钥", { n: created.length }));
-            if (updated.length) parts.push(t("更新 {n} 个", { n: updated.length }));
-            if (unchanged.length) parts.push(t("{n} 个没有变化", { n: unchanged.length }));
-            if (skipped.length) parts.push(t("{n} 个取不到，跳过", { n: skipped.length }));
-            setToast({ kind: "ok", text: parts.join(t("，")) || t("没有可导入的") });
-            setShowLogin(false);
-          }}
-          onManualKey={() => { setShowLogin(false); setPage("keys"); startEdit(); }}
-          onClose={() => setShowLogin(false)}
-        />
-      )}
+      {showLogin && loginPanel()}
 
       {!draft && !showLogin && profiles.length === 0 && (
         // 一把密钥都没有：这是用户唯一该做的事，给它主按钮的分量，
@@ -711,6 +837,24 @@ export default function App() {
       )}
 
       </div>}
+
+      {/* 编辑 / 新建：在当前页面上打开共享弹窗，不切换导航 */}
+      {draft && (() => {
+        const editingProfile = draft.id ? profiles.find(p => p.id === draft.id) : undefined;
+        return (
+          <Editor
+            title={editingProfile ? t("编辑「{name}」", { name: editingProfile.name }) : t("添加密钥")}
+            hint={editingProfile ? undefined : t("保存后在 Claude / Codex 页面选择密钥和模型。")}
+            draft={draft}
+            defaultServiceUrl={defaultServiceUrl}
+            setDraft={setDraft}
+            busy={busy}
+            onCancel={() => setDraft(null)}
+            onSave={saveDraft}
+            onDelete={editingProfile ? () => removeProfile(editingProfile) : undefined}
+          />
+        );
+      })()}
 
       {showAdvanced && (
         <div
@@ -738,7 +882,7 @@ export default function App() {
           <div className="field">
             <label>
               {t("Claude Code 里 haiku / sonnet / opus 分别用哪个模型")}
-              <span className="dim"> · {t("影响后台杂事和快捷切换，留空就不设置")}</span>
+              <span className="dim"> · {t("用于后台任务和模型切换，留空不设置。")}</span>
             </label>
             <input value={aliasHaiku} onChange={(e) => setAliasHaiku(e.target.value)} placeholder="haiku" spellCheck={false} />
             <input value={aliasSonnet} onChange={(e) => setAliasSonnet(e.target.value)} placeholder="sonnet" spellCheck={false} />
@@ -755,7 +899,7 @@ export default function App() {
             <input type="checkbox" checked={conservative} onChange={(e) => setConservative(e.target.checked)} />
             <span>
               {t("Codex 兼容旧版本")}
-              <span className="dim"> · {t("配好后 Codex 还提示没登录时勾这个")}</span>
+              <span className="dim"> · {t("强制使用独立网关配置，不覆盖官方登录。")}</span>
             </span>
           </label>
           {codexKeepsAuth && (
@@ -763,7 +907,7 @@ export default function App() {
               <input type="checkbox" checked={overwriteAuth} disabled={env?.codex.authState === "ExternalStore"} onChange={(e) => setOverwriteAuth(e.target.checked)} />
               <span>
                 {t("写入 Codex 时不保留已有登录")}
-                <span className="dim"> · {env?.codex.authState === "ExternalStore" ? t("Codex 使用独立认证存储，不能勾选") : t("检测到 ChatGPT 本地登录，勾了会退出官方登录")}</span>
+                <span className="dim"> · {env?.codex.authState === "ExternalStore" ? t("Codex 使用独立认证存储，不能勾选") : t("启用后将退出本机 ChatGPT 登录。")}</span>
               </span>
             </label>
           )}
@@ -796,6 +940,7 @@ export default function App() {
       )}
       </main>
       </div>
+      {restartDialog}
     </div>
   );
 }

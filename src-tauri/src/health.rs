@@ -65,6 +65,25 @@ pub enum Tool {
     Codex,
 }
 
+/// A stale launcher selection is not a rejected API key. Validate the local
+/// selection before deciding whether a connection check can be skipped.
+pub fn check_selected_profile(tool: Tool, profile: Option<&crate::state::Profile>, key: Option<&str>) -> Vec<Issue> {
+    let Some(profile) = profile else {
+        return vec![issue("S1", Level::Error, "所选密钥记录已不存在，请重新选择服务", Fix::Keys)];
+    };
+    if key.is_none_or(|k| k.trim().is_empty()) {
+        return vec![issue("S2", Level::Error, "所选密钥缺少凭据，请补充密钥或重新选择服务", Fix::Keys)];
+    }
+    let supported = !profile.is_custom() || match tool {
+        Tool::Codex => !profile.codex_base_url.trim().is_empty(),
+        Tool::Claude => !profile.claude_base_url.trim().is_empty(),
+    };
+    if !supported {
+        return vec![issue("S3", Level::Error, "所选密钥未配置此工具的服务地址，请重新选择服务", Fix::Keys)];
+    }
+    Vec::new()
+}
+
 /// 连接测试的结果（`/models`，不计费）
 pub enum Connection {
     /// 连不上或超时
@@ -75,7 +94,7 @@ pub enum Connection {
     Ok(Vec<String>),
 }
 
-fn host(url: &str) -> Option<String> {
+pub(crate) fn host(url: &str) -> Option<String> {
     let rest = url
         .trim()
         .strip_prefix("https://")
@@ -105,6 +124,11 @@ pub fn check_claude(text: Option<&str>, anthropic_base: &str, service: Service) 
     };
     let value = match serde_json::from_str::<Value>(text) {
         Ok(v) if v.is_object() && v.get("env").is_none_or(|e| e.is_object()) => v,
+        // 只有 env 坏了：可以备份后显式修复，其余设置原样保留
+        Ok(v) if v.is_object() => {
+            out.push(issue("C6", Level::Error, "Claude 配置的 env 不是对象，可备份后修复", Fix::Rebuild));
+            return out;
+        }
         _ => {
             out.push(issue("C1", Level::Error, "Claude 配置文件格式损坏，需手动修复", Fix::None));
             return out;
@@ -150,11 +174,14 @@ pub fn check_claude(text: Option<&str>, anthropic_base: &str, service: Service) 
 /// Claude 桌面版的第三方推理配置（它不读 settings.json，规则单独一套）。
 /// `restart_pending`：配置里还是明文密钥且桌面版正在运行 —— 桌面版启动时会把明文加密，
 /// 还是明文就说明写入后它没重新打开过，运行中的那个还在用旧配置。
+/// `official_chosen`：用户在桌面版里选了 Claude.ai 官方登录。这是用户的选择、不算故障：
+/// 不报问题，用 API 启动时由启动流程弹窗确认切换。
 pub fn check_claude_desktop(
     text: Option<&str>,
     anthropic_base: &str,
     service: Service,
     restart_pending: bool,
+    official_chosen: bool,
 ) -> Vec<Issue> {
     let mut out = Vec::new();
     let Some(text) = text.filter(|t| !t.trim().is_empty()) else {
@@ -177,7 +204,8 @@ pub fn check_claude_desktop(
             out.push(issue("D3", Level::Warn, "Claude 桌面版用了其他认证方式，可能不生效", Fix::Rewrite));
         }
     }
-    if restart_pending {
+    // 选了官方登录时重开也不会用这份配置，D4 的「重新打开」提示没有意义
+    if restart_pending && !official_chosen {
         out.push(issue(
             "D4",
             Level::Warn,
@@ -189,11 +217,11 @@ pub fn check_claude_desktop(
 }
 
 /// Claude 桌面版当前在用的密钥与模型（只在指向网关时）。
-/// 密钥被桌面版加密后读不出原文，`resolve_sealed` 负责按本工具的写入记录认出是哪一把。
+/// 密钥被桌面版加密后读不出原文，`resolve_sealed` 按本工具的写入记录核对是哪一把。
 pub fn current_claude_desktop(
     text: Option<&str>,
     anthropic_base: &str,
-    resolve_sealed: impl Fn(&str) -> Option<String>,
+    resolve_sealed: impl Fn(&str, &crate::claude_desktop::Current) -> Option<String>,
 ) -> Option<CurrentSetup> {
     let c = crate::claude_desktop::current(text?)?;
     if c.provider.as_deref() != Some("gateway") {
@@ -203,8 +231,8 @@ pub fn current_claude_desktop(
     if host(base).is_none() || host(base) != host(anthropic_base) {
         return None;
     }
-    let raw = c.api_key?;
-    let key = if crate::claude_desktop::is_sealed(&raw) { resolve_sealed(&raw)? } else { raw };
+    let raw = c.api_key.clone()?;
+    let key = if crate::claude_desktop::is_sealed(&raw) { resolve_sealed(&raw, &c)? } else { raw };
     Some(CurrentSetup {
         key,
         model: c.models.into_iter().next().unwrap_or_default(),
@@ -398,6 +426,34 @@ mod tests {
         v.iter().map(|i| i.id).collect()
     }
 
+    #[test]
+    fn unavailable_selection_is_not_a_successful_key_check() {
+        let profile = crate::state::Profile::default();
+        for tool in [Tool::Codex, Tool::Claude] {
+            for key in [None, Some("fixture-key")] {
+                let issues = check_selected_profile(tool, None, key);
+                assert_eq!(ids(&issues), ["S1"]);
+                assert_eq!(issues[0].level, Level::Error);
+                assert_eq!(issues[0].fix, Fix::Keys);
+            }
+            for key in [None, Some(""), Some("  ")] {
+                assert_eq!(ids(&check_selected_profile(tool, Some(&profile), key)), ["S2"]);
+            }
+            assert!(check_selected_profile(tool, Some(&profile), Some("fixture-key")).is_empty());
+        }
+    }
+
+    #[test]
+    fn selected_custom_profile_requires_the_requested_tools_endpoint() {
+        let mut profile = crate::state::Profile { claude_base_url: "https://example.test".into(), ..Default::default() };
+        assert_eq!(ids(&check_selected_profile(Tool::Codex, Some(&profile), Some("fixture-key"))), ["S3"]);
+        assert!(check_selected_profile(Tool::Claude, Some(&profile), Some("fixture-key")).is_empty());
+        profile.claude_base_url.clear();
+        profile.codex_base_url = "https://example.test/v1".into();
+        assert_eq!(ids(&check_selected_profile(Tool::Claude, Some(&profile), Some("fixture-key"))), ["S3"]);
+        assert!(check_selected_profile(Tool::Codex, Some(&profile), Some("fixture-key")).is_empty());
+    }
+
     fn claude(env: &str) -> String {
         format!(r#"{{"env":{env}}}"#)
     }
@@ -411,31 +467,40 @@ mod tests {
     #[test]
     fn desktop_rules() {
         let ok = desktop("gateway", CLAUDE_BASE, r#","inferenceCredentialKind":"static""#);
-        assert!(check_claude_desktop(Some(&ok), CLAUDE_BASE, Service::Current, false).is_empty());
-        assert!(check_claude_desktop(None, CLAUDE_BASE, Service::Current, false).is_empty());
-        assert_eq!(ids(&check_claude_desktop(Some("{x"), CLAUDE_BASE, Service::Ai, false)), ["D1"]);
+        assert!(check_claude_desktop(Some(&ok), CLAUDE_BASE, Service::Current, false, false).is_empty());
+        assert!(check_claude_desktop(None, CLAUDE_BASE, Service::Current, false, false).is_empty());
+        assert_eq!(ids(&check_claude_desktop(Some("{x"), CLAUDE_BASE, Service::Ai, false, false)), ["D1"]);
         let v1 = desktop("gateway", "https://gateway.dkby.com/v1", "");
-        assert_eq!(ids(&check_claude_desktop(Some(&v1), CLAUDE_BASE, Service::Current, false)), ["D2"]);
+        assert_eq!(ids(&check_claude_desktop(Some(&v1), CLAUDE_BASE, Service::Current, false, false)), ["D2"]);
         // 选了 AI 密钥时启动会重写，地址问题不提前报
-        assert!(check_claude_desktop(Some(&v1), CLAUDE_BASE, Service::Ai, false).is_empty());
+        assert!(check_claude_desktop(Some(&v1), CLAUDE_BASE, Service::Ai, false, false).is_empty());
         let helper = desktop("gateway", CLAUDE_BASE, r#","inferenceCredentialHelper":"x""#);
-        assert_eq!(ids(&check_claude_desktop(Some(&helper), CLAUDE_BASE, Service::Current, false)), ["D3"]);
-        assert_eq!(ids(&check_claude_desktop(Some(&ok), CLAUDE_BASE, Service::Ai, true)), ["D4"]);
-        assert!(check_claude_desktop(Some(&ok), CLAUDE_BASE, Service::Official, true).is_empty());
+        assert_eq!(ids(&check_claude_desktop(Some(&helper), CLAUDE_BASE, Service::Current, false, false)), ["D3"]);
+        assert_eq!(ids(&check_claude_desktop(Some(&ok), CLAUDE_BASE, Service::Ai, true, false)), ["D4"]);
+        assert!(check_claude_desktop(Some(&ok), CLAUDE_BASE, Service::Official, true, false).is_empty());
+        assert!(check_claude_desktop(Some(&ok), CLAUDE_BASE, Service::Current, true, true).is_empty());
+        assert!(check_claude_desktop(Some(&ok), CLAUDE_BASE, Service::Ai, false, true).is_empty());
+        assert!(check_claude_desktop(Some(&ok), CLAUDE_BASE, Service::Official, false, true).is_empty());
+        let bedrock = desktop("bedrock", CLAUDE_BASE, "");
+        assert!(check_claude_desktop(Some(&bedrock), CLAUDE_BASE, Service::Ai, false, true).is_empty());
     }
 
     #[test]
     fn reads_current_desktop_setup() {
         let plain = desktop("gateway", CLAUDE_BASE, r#","inferenceModels":["m1","m2"]"#);
-        let c = current_claude_desktop(Some(&plain), CLAUDE_BASE, |_| None).unwrap();
+        let c = current_claude_desktop(Some(&plain), CLAUDE_BASE, |_, _| None).unwrap();
         assert_eq!((c.key.as_str(), c.model.as_str()), ("sk-1", "m1"));
         let sealed = r#"{"inferenceProvider":"gateway","inferenceGatewayBaseUrl":"https://gateway.dkby.com","inferenceGatewayApiKey":"__sealed__:v1:AA"}"#;
-        assert!(current_claude_desktop(Some(sealed), CLAUDE_BASE, |_| None).is_none());
-        assert_eq!(current_claude_desktop(Some(sealed), CLAUDE_BASE, |_| Some("sk-w".into())).unwrap().key, "sk-w");
+        assert!(current_claude_desktop(Some(sealed), CLAUDE_BASE, |_, _| None).is_none());
+        assert_eq!(current_claude_desktop(Some(sealed), CLAUDE_BASE, |_, _| Some("sk-w".into())).unwrap().key, "sk-w");
+        // 未来的密文版本同样只能靠写入记录认出，不当作明文
+        let v2 = sealed.replace("v1:", "v2:");
+        assert!(current_claude_desktop(Some(&v2), CLAUDE_BASE, |_, _| None).is_none());
+        assert_eq!(current_claude_desktop(Some(&v2), CLAUDE_BASE, |raw, _| raw.starts_with("__sealed__:v2:").then(|| "sk-w".into())).unwrap().key, "sk-w");
         let other = desktop("gateway", "https://relay.example", "");
-        assert!(current_claude_desktop(Some(&other), CLAUDE_BASE, |_| Some("x".into())).is_none());
+        assert!(current_claude_desktop(Some(&other), CLAUDE_BASE, |_, _| Some("x".into())).is_none());
         let bedrock = desktop("bedrock", CLAUDE_BASE, "");
-        assert!(current_claude_desktop(Some(&bedrock), CLAUDE_BASE, |_| None).is_none());
+        assert!(current_claude_desktop(Some(&bedrock), CLAUDE_BASE, |_, _| None).is_none());
     }
 
     #[test]
@@ -449,7 +514,16 @@ mod tests {
         let v = check_claude(Some("{ not json"), CLAUDE_BASE, Service::Ai);
         assert_eq!(ids(&v), ["C1"]);
         assert_eq!(v[0].fix, Fix::None);
-        assert_eq!(ids(&check_claude(Some(r#"{"env":1}"#), CLAUDE_BASE, Service::Current)), ["C1"]);
+        assert_eq!(ids(&check_claude(Some("[]"), CLAUDE_BASE, Service::Current)), ["C1"]);
+    }
+
+    #[test]
+    fn c6_malformed_env_offers_backup_repair() {
+        for text in [r#"{"env":1}"#, r#"{"env":null}"#, r#"{"env":[]}"#] {
+            let v = check_claude(Some(text), CLAUDE_BASE, Service::Current);
+            assert_eq!(ids(&v), ["C6"]);
+            assert_eq!(v[0].fix, Fix::Rebuild);
+        }
     }
 
     #[test]

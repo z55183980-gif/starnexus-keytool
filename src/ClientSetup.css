@@ -1,0 +1,42 @@
+.client-setup { display: grid; gap: 16px; padding: 4px; font-size: 13px; line-height: 1.65; min-width: 0; }
+.client-setup p { margin: 0; }
+.client-setup button { padding: 9px 14px; border-radius: 12px; display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 40px; }
+.setup-status { display: flex; align-items: flex-start; gap: 10px; padding: 13px 14px; border-radius: 14px; background: rgba(84,112,150,.08); color: #405774; }
+.setup-status > svg { flex: 0 0 auto; margin-top: 3px; }
+.setup-status strong { font-size: 14px; }
+.setup-status.is-ready { background: rgba(31,137,101,.08); color: #216d53; }
+.setup-status.is-warning { background: rgba(181,126,31,.09); color: #805715; }
+.setup-command-card { min-width: 0; border: 1px solid rgba(81,109,149,.16); border-radius: 14px; background: rgba(226,234,245,.65); overflow: hidden; }
+.setup-command-heading { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 8px 12px; border-bottom: 1px solid rgba(81,109,149,.1); }
+.setup-command-heading > span { display: flex; align-items: center; gap: 7px; color: #4c607c; font-size: 12px; }
+.setup-command-heading { flex-wrap: wrap; }
+.setup-command-actions { display: flex; gap: 6px; margin-left: auto; }
+.setup-command-heading > span { min-width: 0; }
+.launcher-pages .client-setup .setup-command-heading select { min-width: 0; max-width: 190px; padding: 5px 7px; font-size: 12px; border-radius: 8px; }
+.client-setup .setup-command-heading button { min-height: 32px; padding: 4px 10px; border-radius: 8px; font-size: 12px; }
+.client-setup .install-command { margin: 0; padding: 16px 14px; overflow-x: auto; white-space: pre; user-select: text; font-size: 12px; line-height: 1.6; }
+.client-setup .install-command code { background: none; padding: 0; border: 0; color: #243852; font: inherit; font-family: Consolas, "SFMono-Regular", monospace; }
+.setup-terminal { justify-self: start; }
+.setup-hint, .setup-path { color: #546980; font-size: 12px; overflow-wrap: anywhere; }
+.setup-details summary { cursor: pointer; color: #546980; font-size: 12px; }
+.setup-path { padding-top: 6px; user-select: text; }
+.setup-recovery { display: grid; gap: 10px; padding: 12px; background: rgba(181,126,31,.06); border-radius: 12px; }
+.setup-recovery button { justify-self: start; }
+.setup-feedback { min-height: 20px; color: #4d647e; font-size: 12px; }
+.setup-error { color: #a52c32; overflow-wrap: anywhere; }
+.setup-progress { display: grid; gap: 6px; color: #405774; }
+.setup-progress progress { width: 100%; height: 8px; accent-color: #087b65; }
+.setup-details > .setup-command-card { margin-top: 10px; }
+.setup-footer { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; padding-top: 14px; border-top: 1px solid rgba(81,109,149,.14); }
+.setup-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.launcher-pages .client-setup .setup-footer button.setup-docs:not(.primary):not(.site):not(.service-option):not(.model-option):not(.console-btn) { padding: 4px 0; min-height: 36px; border: 0; border-radius: 4px; background: transparent; box-shadow: none; color: #45617f; font-size: 12px; }
+.launcher-pages .client-setup button.primary { background: #087b65; color: #fff; border-radius: 12px; box-shadow: 0 3px 9px rgba(7,94,80,.16); }
+.launcher-pages .client-setup button.primary:hover:not(:disabled) { background: #066551; }
+.client-setup :focus-visible { outline: 2px solid #4266d5; outline-offset: 3px; }
+.client-help-link { margin: 0 0 8px; font-size: 12px; align-self: flex-start; }
+@media (max-width: 440px) {
+  .setup-footer { align-items: stretch; flex-direction: column; }
+  .setup-actions { flex-direction: column; }
+  .setup-actions button { width: 100%; }
+  .setup-docs { align-self: flex-start; }
+}

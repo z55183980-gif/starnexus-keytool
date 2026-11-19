@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "StarNexus Key Tool",
-  "version": "0.1.2",
+  "version": "0.2.9",
   "identifier": "com.dkby.starnexus.keytool",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -12,13 +12,15 @@
   "app": {
     "windows": [
       {
-        "title": "StarNexus 密钥管理工具",
-        "width": 560,
-        "height": 884,
+        "title": "",
+        "width": 480,
+        "height": 865,
         "center": true,
-        "minWidth": 560,
-        "minHeight": 560,
+        "minWidth": 420,
+        "minHeight": 600,
+        "maxWidth": 640,
         "resizable": true,
+        "maximizable": false,
         "theme": "Light"
       }
     ],
@@ -53,6 +55,7 @@
       }
     },
     "macOS": {
+      "entitlements": "Entitlements.plist",
       "minimumSystemVersion": "12.0"
     }
   },
@@ -63,6 +66,12 @@
         "schemes": [
           "com.dkby.starnexus.keytool"
         ]
+      }
+    },
+    "updater": {
+      "pubkey": "",
+      "windows": {
+        "installMode": "passive"
       }
     }
   }

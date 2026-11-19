@@ -1,3 +1,4 @@
+// StarNexus Key Tool webview: browser-side React and TypeScript.
 {
   "compilerOptions": {
     "target": "ES2020",

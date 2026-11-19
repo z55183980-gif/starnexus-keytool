@@ -4,6 +4,7 @@
 //! 但避开了它两个已知 bug：
 //!   - issue #1790 / #1104：只写 BASE_URL + AUTH_TOKEN，漏了 ANTHROPIC_MODEL
 //!   - issue #2525：把 key 写进 apiKey 字段却留空 env.ANTHROPIC_AUTH_TOKEN，导致 401
+//!
 //! 我们把三个键一次写齐，且只合并不覆盖。
 
 use crate::error::{AppError, Result};
@@ -54,6 +55,7 @@ pub fn inspect(text: Option<&str>) -> SettingsState {
         return SettingsState::Missing;
     }
     match serde_json::from_str::<Value>(t) {
+        Ok(v) if v.get("env").is_some_and(|env| !env.is_object()) => SettingsState::Broken("settings.json 的 env 必须是对象".into()),
         Ok(v) if v.is_object() => SettingsState::Ok,
         Ok(_) => SettingsState::Broken("settings.json 顶层不是对象".into()),
         Err(e) => SettingsState::Broken(e.to_string()),
@@ -65,6 +67,7 @@ pub fn inspect(text: Option<&str>) -> SettingsState {
 /// 用户的 permissions、hooks、statusLine、model 等一律原样保留 ——
 /// 这些东西丢了比配置失败更糟，用户往往察觉不到。
 pub fn merge(text: Option<&str>, s: &ClaudeSettings) -> Result<String> {
+    if let SettingsState::Broken(reason) = inspect(text) { return Err(AppError::JsonParse(reason)); }
     let mut root: Map<String, Value> = match text {
         Some(t) if !t.trim().is_empty() => serde_json::from_str::<Value>(t)
             .map_err(|e| AppError::JsonParse(e.to_string()))?
@@ -112,8 +115,26 @@ pub fn merge(text: Option<&str>, s: &ClaudeSettings) -> Result<String> {
         .map_err(|e| AppError::JsonParse(e.to_string()))
 }
 
+/// `env` 不是对象时的显式修复：去掉损坏的 `env`，其余设置原样保留。
+/// 只处理「顶层是对象、仅 env 损坏」；整份 JSON 解析不了仍须手动修复。调用方负责先备份。
+pub fn without_malformed_env(text: Option<&str>) -> Result<String> {
+    let t = text.filter(|t| !t.trim().is_empty())
+        .ok_or_else(|| AppError::Other("settings.json 不存在或为空，请使用常规写入".into()))?;
+    let mut root = serde_json::from_str::<Value>(t)
+        .map_err(|e| AppError::JsonParse(format!("{e}。整份文件无法解析，请手动修复")))?
+        .as_object()
+        .cloned()
+        .ok_or_else(|| AppError::JsonParse("settings.json 顶层不是对象，请手动修复".into()))?;
+    if root.get("env").is_none_or(Value::is_object) {
+        return Err(AppError::Other("settings.json 的 env 没有损坏，请刷新后使用常规写入".into()));
+    }
+    root.remove("env");
+    serde_json::to_string_pretty(&Value::Object(root)).map_err(|e| AppError::JsonParse(e.to_string()))
+}
+
 /// 切回官方：只摘掉我们写的几个 env 键，其余一概不动
 pub fn revert(text: Option<&str>) -> Result<Option<String>> {
+    if let SettingsState::Broken(reason) = inspect(text) { return Err(AppError::JsonParse(reason)); }
     let Some(t) = text else { return Ok(None) };
     if t.trim().is_empty() {
         return Ok(None);
@@ -201,6 +222,29 @@ mod tests {
             opus_model: "claude-opus-4-8".into(),
             sonnet_model: "claude-sonnet-4-6".into(),
             haiku_model: "claude-haiku-4-5-20251001".into(),
+        }
+    }
+
+    #[test]
+    fn malformed_env_is_never_replaced() {
+        for env in ["[]", "true", "null", "\"value\""] {
+            let text = format!("{{\"env\":{env}}}");
+            assert!(matches!(inspect(Some(&text)), SettingsState::Broken(_)));
+            assert!(merge(Some(&text), &s()).is_err());
+            assert!(revert(Some(&text)).is_err());
+        }
+    }
+    #[test]
+    fn malformed_env_repair_keeps_every_other_setting() {
+        let text = r#"{"env":[1],"permissions":{"allow":["Bash(ls)"]},"model":"opus"}"#;
+        let repaired = without_malformed_env(Some(text)).unwrap();
+        let merged: Value = serde_json::from_str(&merge(Some(&repaired), &s()).unwrap()).unwrap();
+        assert_eq!(merged["permissions"]["allow"][0], "Bash(ls)");
+        assert_eq!(merged["model"], "opus");
+        assert!(merged["env"].is_object());
+        // 只修 env：整份坏掉、顶层不是对象、env 正常、文件不存在都拒绝
+        for bad in [Some("{"), Some("[]"), Some(r#"{"env":{}}"#), Some("{}"), None] {
+            assert!(without_malformed_env(bad).is_err(), "{bad:?}");
         }
     }
 

@@ -45,7 +45,7 @@ button:focus-visible, select:focus-visible, summary:focus-visible { outline: 2px
 /* 外壳：内容占满宽度，操作栏悬浮在底部 */
 .workspace-shell { min-height: 100vh; }
 /* 四个页面的内容列同宽：工具页卡片、密钥列表、设置卡片、输出面板左右边对齐 */
-.workspace-main { --page-w: 760px; min-width: 0; max-width: 1080px; width: 100%; box-sizing: border-box; margin: 0 auto; padding: 30px 32px 120px; }
+.workspace-main { --page-w: 580px; min-width: 0; max-width: 1080px; width: 100%; box-sizing: border-box; margin: 0 auto; padding: 30px 32px 120px; }
 
 /* 顶部小品牌行：Logo 从操作栏移到这里 */
 .brand-row { display: flex; align-items: center; gap: 8px; margin: -6px 0 14px; color: var(--dim); font-size: 12px; font-weight: 500; letter-spacing: .2px; }
@@ -115,7 +115,7 @@ button:focus-visible, select:focus-visible, summary:focus-visible { outline: 2px
 .eyebrow { font-size: 11px; letter-spacing: 1px; color: #7c879d; margin-bottom: 7px; }
 /* 这几页里的普通按钮：胶囊形玻璃 */
 .launcher-pages button, .key-actions > button { border-radius: 999px; }
-.launcher-pages button:not(.primary):not(.site):not(.service-option):not(.model-option):not(.console-btn):not(.lang-switch button), .key-actions > button:not(.primary) { background: var(--glass-strong); border-color: var(--glass-edge); box-shadow: inset 0 1px 0 #fff, 0 0 0 .5px rgba(24, 36, 80, .08), 0 2px 8px rgba(36, 52, 110, .08); }
+.launcher-pages button:not(.primary):not(.site):not(.service-option):not(.service-pick):not(.model-option):not(.effort-opt):not(.console-btn):not(.lang-switch button), .key-actions > button:not(.primary) { background: var(--glass-strong); border-color: var(--glass-edge); box-shadow: inset 0 1px 0 #fff, 0 0 0 .5px rgba(24, 36, 80, .08), 0 2px 8px rgba(36, 52, 110, .08); }
 .icon-round { width: 38px; height: 38px; padding: 0 !important; display: grid; place-items: center; }
 
 /* 工具页面：顶部启动区 + 下面几节（服务、工作目录、状态），页面自然往下延伸 */
@@ -173,7 +173,6 @@ button:focus-visible, select:focus-visible, summary:focus-visible { outline: 2px
 .service-meta { display: flex !important; flex-wrap: wrap; column-gap: 10px; }
 .service-meta span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; font-size: 11px; }
 .service-current { font-size: 11px; color: #1d7f58; background: rgba(35, 163, 111, .13); padding: 2px 8px; border-radius: 999px; white-space: nowrap; flex-shrink: 0; }
-.desktop-hint { margin: 0; font-size: 12px; color: var(--dim); }
 .launch-warning { margin: 0; color: var(--warn-fg); font-size: 12px; overflow-wrap: anywhere; }
 .launch-warning .site { padding: 0; font-size: 12px; }
 .launcher-pages .launch-button { display: flex; align-items: center; justify-content: center; gap: 10px; width: 100%; min-height: 52px; padding: 14px 8px; font-size: 16px; font-weight: 600; }
@@ -190,12 +189,21 @@ button:focus-visible, select:focus-visible, summary:focus-visible { outline: 2px
 .workdir-row .ui-icon { width: 16px; height: 16px; color: var(--accent); flex-shrink: 0; }
 .workdir-row .service-switch { margin-left: auto; }
 /* 模型一行：和工作目录同样式；模型名用等宽字，Codex 后面跟思考深度 */
-.model-row strong.mono { font-size: 12.5px; max-width: 55%; }
-.model-row .model-extra { font-size: 12px; color: var(--dim); white-space: nowrap; }
 
 /* 更换模型弹窗：输入框 + 按厂商分组的可用模型列表（在弹窗里滚动） */
-.model-effort { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 13px; color: var(--dim); }
-.model-effort select { flex: 0 1 220px; border-radius: 12px; }
+/* 换模型弹窗：模型名 / 思考深度 / 可用模型三段，各带小标题 */
+.model-dialog .picker-body { gap: 18px; scrollbar-width: thin; scrollbar-color: rgba(24, 36, 80, .22) transparent; }
+.model-field { display: flex; flex-direction: column; gap: 7px; }
+.model-field-label { padding: 0 2px; font-size: 12px; font-weight: 600; color: var(--dim); }
+.effort-seg { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 3px; padding: 3px; border-radius: 14px; background: rgba(24, 36, 80, .06); }
+.effort-seg button.effort-opt { min-height: 34px; padding: 6px 2px; border: 0; border-radius: 11px; background: transparent; box-shadow: none; color: #4a5568; font: inherit; font-size: 13px; white-space: nowrap; cursor: pointer; transition: background-color 150ms, color 150ms; }
+.effort-seg button.effort-opt:hover:not(:disabled) { background: rgba(255, 255, 255, .6); }
+.effort-seg button.effort-opt[aria-checked="true"] { background: #fff; color: #075e50; font-weight: 600; box-shadow: 0 1px 3px rgba(24, 36, 80, .14), 0 0 0 .5px rgba(24, 36, 80, .08); }
+.effort-seg button.effort-opt:disabled { cursor: default; opacity: .6; }
+.effort-hint { padding: 0 2px; font-size: 12px; color: var(--dim); }
+.model-option > .ui-icon { margin-left: auto; width: 15px; height: 15px; flex-shrink: 0; }
+.model-dialog .picker-ft button.primary { width: 100%; }
+.model-dialog .picker-ft button.primary:disabled { opacity: .5; }
 .model-list { display: flex; flex-direction: column; gap: 10px; }
 .model-list > .settings-note { margin: 0; }
 .model-group { display: flex; flex-direction: column; gap: 2px; }
@@ -323,6 +331,10 @@ button:focus-visible, select:focus-visible, summary:focus-visible { outline: 2px
 .setting-dot { width: 8px; height: 8px; flex-shrink: 0; border-radius: 50%; background: #c3c9d6; }
 .setting-dot.found { background: #23a36f; box-shadow: 0 0 0 3px rgba(35, 163, 111, .16); }
 .setting-dot.missing { background: #e9a23b; box-shadow: 0 0 0 3px rgba(233, 162, 59, .16); }
+.setting-brand { position: relative; display: grid; place-items: center; width: 36px; height: 36px; flex-shrink: 0; border-radius: 11px; background: var(--glass-strong); box-shadow: inset 0 1px 0 #fff, 0 1px 4px rgba(36, 52, 110, .07); }
+.setting-brand.claude { background: linear-gradient(180deg, #fff3ec, #fbe3d6); }
+.setting-brand .brand { width: 23px; height: 23px; }
+.setting-brand .setting-dot { position: absolute; right: -2px; bottom: -2px; width: 7px; height: 7px; border: 2px solid #f6f9ff; box-shadow: none; }
 .setting-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .setting-text strong { font-size: 14px; font-weight: 600; }
 .setting-sub { font-size: 12px; color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -342,15 +354,13 @@ button:focus-visible, select:focus-visible, summary:focus-visible { outline: 2px
 .path-actions .ui-icon { width: 15px; height: 15px; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; }
 
-@media(max-width: 850px) {
-  .workspace-main { padding: 24px 20px 116px; }
-  .tool-hero { padding: 16px; border-radius: 22px; }
-  .project-path { display: none; }
-}
-@media(max-width: 700px) {
-  .nav-pill { --tab-w: 68px; }
-  .launch-heading h1 { font-size: 22px; }
-}
+/* 窗口最宽 640，原来的窄屏样式直接作为默认 */
+.workspace-main { padding: 24px 20px 116px; }
+.tool-hero { padding: 16px; border-radius: 22px; }
+.project-path { display: none; }
+
+.nav-pill { --tab-w: 68px; }
+.launch-heading h1 { font-size: 22px; }
 @media(max-width: 420px) {
   .workspace-main { padding: 18px 12px 112px; }
   .launch-heading { align-items: flex-start; flex-wrap: wrap; }
@@ -388,6 +398,13 @@ body { background: radial-gradient(ellipse at 0 0, #e5eafa, transparent 48%), #f
 .tool-hero h1 { font-size: 26px; }
 .launch-brand { width: 48px; height: 48px; border-radius: 14px; box-shadow: inset 0 1px 0 white, 0 2px 6px rgba(36,52,110,.06); }
 .install-state { margin-top: 3px; }
+.install-status-row { display: flex; align-items: center; flex-wrap: wrap; column-gap: 10px; row-gap: 2px; min-height: 28px; }
+.install-status-row .install-state { margin-top: 0; }
+.launcher-pages .install-inline-action { min-height: 28px; padding: 2px 0; border: 0; border-radius: 0; background: transparent !important; box-shadow: none !important; color: var(--accent); font-size: 12px; line-height: 20px; white-space: nowrap; --button-hover-bg: transparent; }
+.launcher-pages .install-inline-action:is(:hover, :active):not(:disabled) { background: transparent !important; box-shadow: none !important; translate: none; }
+.launcher-pages .install-inline-action:hover:not(:disabled) { text-decoration: underline; }
+.launcher-pages .install-inline-action.has-update { font-weight: 650; }
+.install-version { font-variant-numeric: tabular-nums; }
 .readiness-card { display: flex; align-items: center; gap: 12px; padding: 15px 16px; border-radius: 16px; background: #eef2fc; border: 1px solid #dce4f4; }
 .readiness-card.ok { background: #eff8f4; border-color: #d8ece1; }
 .readiness-card.error { background: #fff2f0; border-color: #f3d8d3; }
@@ -439,18 +456,67 @@ body { background: radial-gradient(ellipse at 0 0, #e5eafa, transparent 48%), #f
 .picker-ft { flex-shrink: 0; padding-top: 12px; border-top: 1px solid #e7ebf2; }
 .picker-hd { flex-shrink: 0; }
 
-@media(max-width: 720px) {
-  .workspace-brand { margin-bottom: 14px; }
-  .workspace-main, .workspace-main.fill { padding: 16px 18px 20px; }
-  .tool-hero { padding: 18px; border-radius: 20px; gap: 16px; }
-  .tool-hero h1 { font-size: 24px; }
-  .readiness-label { display: none; }
-  .readiness-card { padding: 12px; }
-  .config-label { flex-basis: 64px; }
-  .console-status { max-width: 180px; overflow: hidden; text-overflow: ellipsis; }
-  .setting-row { flex-wrap: wrap; }
-  .lang-switch { margin-left: auto; }
-}
+/* 紧凑面板（窗口 420~640 宽）的默认间距 */
+.workspace-brand { margin-bottom: 14px; }
+.workspace-main, .workspace-main.fill { padding: 16px 18px 20px; }
+.tool-hero { padding: 18px; border-radius: 20px; gap: 16px; }
+.tool-hero h1 { font-size: 24px; }
+.readiness-label { display: none; }
+.readiness-card { padding: 12px; }
+.config-label { flex-basis: 64px; }
+.console-status { max-width: 180px; overflow: hidden; text-overflow: ellipsis; }
+.setting-row { flex-wrap: wrap; }
+.lang-switch { margin-left: auto; }
 @media (prefers-reduced-transparency: reduce) {
   .nav-pill.liquid-glass, .tool-hero, .settings-card, .key-workspace .card, .picker-sheet { background: #fff; backdrop-filter: none; -webkit-backdrop-filter: none; }
 }
+
+/* 使用服务：卡片里直接列出全部选项（不再收进「切换」弹窗）。
+   单选圆点 = 启动时用哪一项；绿色「当前生效」= 配置文件里现在实际用的是哪一项 */
+.service-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px 4px; }
+.service-list.inline { gap: 0; padding: 4px 6px 6px; max-height: 360px; overflow-y: auto; overscroll-behavior: contain; }
+.service-row { display: flex; align-items: center; gap: 8px; padding-right: 8px; border: 1px solid transparent; border-radius: 12px; transition: background .15s, border-color .15s; }
+.service-row + .service-row { margin-top: 2px; }
+.service-row:hover { background: rgba(232, 238, 255, .45); }
+.service-row.is-current { background: rgba(63, 102, 240, .04); }
+.service-row.bad { background: var(--warn-bg); border-color: var(--warn-bd); }
+.service-info { display: flex; align-items: center; gap: 11px; flex: 1; min-width: 0; padding: 10px 8px 10px 10px; text-align: left; }
+.service-info.is-unavailable { opacity: .55; }
+.service-icon { display: grid; place-items: center; width: 30px; height: 30px; flex-shrink: 0; border-radius: 9px; color: var(--dim); background: #fff; box-shadow: inset 0 1px 0 #fff, 0 0 0 .5px rgba(24, 36, 80, .1); }
+.service-icon .ui-icon, .service-icon .brand { width: 16px; height: 16px; }
+.service-row.is-current .service-icon { color: var(--accent); }
+.service-list.inline .service-text strong { font-size: 14px; }
+.service-list.inline .service-meta { align-items: center; }
+.service-list.inline .service-model { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; min-width: 0; padding: 2px 0; font: inherit; }
+.service-list.inline .service-meta span { font-size: 12px; }
+.service-title { display: flex; flex-wrap: wrap; align-items: center; gap: 3px 7px; }
+.service-title strong { min-width: 0; max-width: 100%; }
+.launcher-pages .service-title .service-key-title { font: inherit; padding: 0; color: inherit; text-align: start; white-space: normal; overflow-wrap: anywhere; }
+.launcher-pages .service-title .service-key-title:hover:not(:disabled) { color: var(--accent); text-decoration: underline; }
+.service-key-menu { position: fixed; z-index: 200; display: grid; min-width: 112px; padding: 4px; border: 1px solid var(--border); border-radius: 10px; background: var(--panel, white); box-shadow: 0 6px 20px #18243830; }
+.service-key-menu button { padding: 6px 12px; border: 0; border-radius: 6px; font-size: 13px; text-align: start; background: transparent; }
+.service-key-menu button:is(:hover, :focus-visible):not(:disabled) { color: var(--accent); background: rgba(63,102,240,.08); }
+.service-key-menu button:disabled { pointer-events: none; }
+.service-row:has(.service-key-title) button:disabled { pointer-events: none; }
+.launcher-pages .service-enable { flex: 0 0 auto; inline-size: 4.8em; min-height: 28px; padding: 4px 6px; border-radius: 8px; font-size: 12px; white-space: nowrap; }
+.service-list.inline .service-current { display: inline-flex; align-items: center; gap: 3px; font-size: 11px; padding: 2px 6px; }
+.service-current .ui-icon { width: 11px; height: 11px; }
+.launch-configuration > .service-list.inline + button { border-top: 1px solid rgba(40,57,90,.07); }
+
+/* 启动按钮在卡片顶部（紧跟启动方式），下面的提示居中跟在说明后面 */
+.tool-hero .launch-warning { margin-top: -6px; text-align: center; }
+.tool-hero .client-help-link { margin: -4px 0 0; }
+
+/* 工作目录：启动按钮上方的一行文字，不带标题和卡片 */
+.launcher-pages .tool-hero .workdir-inline { display: flex; align-items: center; gap: 6px; width: 100%; min-width: 0; margin: 0 0 -6px; padding: 2px 4px; border-radius: 8px; font-size: 12.5px; color: var(--dim); text-align: left; }
+.launcher-pages .tool-hero .workdir-inline:hover:not(:disabled) { background: none !important; text-decoration: none; color: #2a3446; }
+.workdir-inline .ui-icon { width: 15px; height: 15px; flex-shrink: 0; color: var(--dim); }
+.workdir-inline-path { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.workdir-inline-switch { flex-shrink: 0; color: var(--accent); }
+.workdir-inline:hover:not(:disabled) .workdir-inline-switch { text-decoration: underline; }
+
+/* 当前配置不对应列表里任何一项时，列表上方的一句说明 */
+.service-note { margin: 0 4px 6px; padding: 8px 12px; border-radius: 12px; font-size: 12px; line-height: 1.6; color: #56667c; background: rgba(110, 124, 160, .08); }
+.service-note.bad { color: #85590f; background: var(--warn-bg); }
+.service-note span { display: block; }
+.service-note small { display: block; margin-top: 2px; font-size: 11.5px; color: #7a8599; }

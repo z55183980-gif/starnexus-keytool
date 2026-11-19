@@ -4,7 +4,7 @@ import react from "@vitejs/plugin-react";
 import process from "node:process";
 const host = process.env.TAURI_DEV_HOST;
 
-// https://vite.dev/config/
+// StarNexus Key Tool: local webview preview and Tauri frontend build.
 export default defineConfig(() => ({
   plugins: [react()],
 

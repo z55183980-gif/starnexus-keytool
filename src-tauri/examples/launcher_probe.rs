@@ -13,6 +13,7 @@ fn main() {
                     .to_string_lossy()
                     .into_owned()
             }),
+            service: None,
         };
         match tauri::async_runtime::block_on(launcher::launch_client(req)) {
             Ok(receipt) => println!("{}", receipt.message),

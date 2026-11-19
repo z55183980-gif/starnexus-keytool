@@ -3,28 +3,25 @@ use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct RemoteConfig {
     pub base_url: String,
     pub wire_api: String,
     pub default_model: String,
     pub recommended_models: Vec<String>,
-    #[serde(default)]
     pub claude_default_model: String,
-    #[serde(default)]
     pub claude_recommended_models: Vec<String>,
     /// opus / sonnet / haiku 三个别名各自解析到的网关模型
-    #[serde(default)]
     pub claude_opus_model: String,
-    #[serde(default)]
     pub claude_sonnet_model: String,
-    #[serde(default)]
     pub claude_haiku_model: String,
-    #[serde(default)]
     pub min_client_version: String,
-    #[serde(default)]
     pub notice: String,
-    #[serde(default)]
     pub write_mode: String,
+}
+
+impl Default for RemoteConfig {
+    fn default() -> Self { builtin_defaults() }
 }
 
 /// 拉不到远程配置时的兜底 —— 绝不能因为拉不到就罢工
@@ -192,46 +189,47 @@ pub async fn list_models(base_url: &str, api_key: &str, ignore_proxy: bool) -> R
     })
 }
 
-/// 拉远程配置。失败静默回落到内置默认值，绝不阻断用户。
-pub async fn fetch_remote_config(endpoint: &str, ignore_proxy: bool) -> RemoteConfig {
-    let fallback = builtin_defaults();
-
-    let Ok(c) = client(ignore_proxy) else {
-        return fallback;
-    };
-    let Ok(resp) = c.get(endpoint).send().await else {
-        return fallback;
-    };
-    if !resp.status().is_success() {
-        return fallback;
-    }
-    match resp.json::<RemoteConfig>().await {
-        Ok(mut cfg) if !cfg.base_url.is_empty() => {
-            // 远端没给 Claude 相关字段时补内置值，别让下拉框空着
-            if cfg.claude_default_model.is_empty() {
-                cfg.claude_default_model = fallback.claude_default_model.clone();
-            }
-            if cfg.claude_recommended_models.is_empty() {
-                cfg.claude_recommended_models = fallback.claude_recommended_models.clone();
-            }
-            if cfg.claude_opus_model.is_empty() {
-                cfg.claude_opus_model = fallback.claude_opus_model.clone();
-            }
-            if cfg.claude_sonnet_model.is_empty() {
-                cfg.claude_sonnet_model = fallback.claude_sonnet_model.clone();
-            }
-            if cfg.claude_haiku_model.is_empty() {
-                cfg.claude_haiku_model = fallback.claude_haiku_model.clone();
-            }
-            cfg
+/// Fetch only the fixed, trusted policy endpoint. Failure is handled by the last-good cache.
+pub async fn fetch_remote_config(endpoint: &str, ignore_proxy: bool) -> Result<RemoteConfig> {
+    let mut response = client(ignore_proxy)?.get(endpoint)
+        .timeout(Duration::from_secs(5)).send().await
+        .map_err(|e| AppError::Network(e.to_string()))?
+        .error_for_status().map_err(|e| AppError::Network(e.to_string()))?;
+    const MAX_CONFIG: usize = 64 * 1024;
+    let mut bytes = Vec::new();
+    while let Some(chunk) = response.chunk().await.map_err(|e| AppError::Network(e.to_string()))? {
+        if bytes.len() + chunk.len() > MAX_CONFIG {
+            return Err(AppError::Other("远程配置过大".into()));
         }
-        _ => fallback,
+        bytes.extend_from_slice(&chunk);
     }
+    parse_remote_config(&bytes)
+}
+
+pub(crate) fn parse_remote_config(bytes: &[u8]) -> Result<RemoteConfig> {
+    let document: serde_json::Value = serde_json::from_slice(bytes).map_err(|e| AppError::JsonParse(e.to_string()))?;
+    if !document.get("min_client_version").is_some_and(serde_json::Value::is_string) {
+        return Err(AppError::Other("远程配置缺少最低版本声明".into()));
+    }
+    serde_json::from_value(document).map_err(|e| AppError::JsonParse(e.to_string()))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn partial_policy_preserves_all_builtin_models_and_requires_explicit_minimum() {
+        let parsed = parse_remote_config(br#"{"min_client_version":"0.2.6","notice":"test"}"#).unwrap();
+        let mut expected = builtin_defaults();
+        expected.min_client_version = "0.2.6".into();
+        expected.notice = "test".into();
+        assert_eq!(serde_json::to_value(parsed).unwrap(), serde_json::to_value(expected).unwrap());
+        for invalid in ["{}", "null", "[]", "broken", r#"{"min_client_version":null}"#, r#"{"min_client_version":123}"#] {
+            assert!(parse_remote_config(invalid.as_bytes()).is_err(), "{invalid}");
+        }
+        assert!(parse_remote_config(br#"{"min_client_version":""}"#).is_ok());
+    }
 
     #[test]
     fn catalog_keeps_endpoints() {

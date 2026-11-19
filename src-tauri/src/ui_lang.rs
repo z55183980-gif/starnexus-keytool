@@ -14,6 +14,7 @@ pub enum Lang {
     /// 繁体，按香港用语
     ZhHk,
     En,
+    Ru,
 }
 
 static CURRENT: RwLock<Option<Lang>> = RwLock::new(None);
@@ -26,11 +27,12 @@ pub fn parse(code: &str) -> Option<Lang> {
         // 早期版本存的繁体代码
         "zh-TW" => Some(Lang::ZhHk),
         "en" => Some(Lang::En),
+        "ru" => Some(Lang::Ru),
         _ => None,
     }
 }
 
-/// 按系统语言列表挑：香港、澳门、台湾或繁体 → 繁體（香港用语）；其他中文 → 简体；其余以及认不出来 → English
+/// 按系统语言列表挑：香港、澳门、台湾或繁体 → 繁體（香港用语）；其他中文 → 简体；俄语 → Русский；其余以及认不出来 → English
 pub fn from_locales<I: IntoIterator<Item = String>>(locales: I) -> Lang {
     for raw in locales {
         let l = raw.to_lowercase().replace('_', "-");
@@ -39,6 +41,9 @@ pub fn from_locales<I: IntoIterator<Item = String>>(locales: I) -> Lang {
         }
         if l.starts_with("zh") {
             return Lang::ZhCn;
+        }
+        if l.starts_with("ru") {
+            return Lang::Ru;
         }
         if !l.is_empty() {
             return Lang::En;
@@ -66,18 +71,19 @@ pub fn current() -> Lang {
     CURRENT.read().ok().and_then(|c| *c).unwrap_or_else(detect_system)
 }
 
-/// 按当前语言从三种写法里挑一个
-pub fn pick<'a>(zh_cn: &'a str, zh_hk: &'a str, en: &'a str) -> &'a str {
+/// 按当前语言从四种写法里挑一个
+pub fn pick<'a>(zh_cn: &'a str, zh_hk: &'a str, en: &'a str, ru: &'a str) -> &'a str {
     match current() {
         Lang::ZhCn => zh_cn,
         Lang::ZhHk => zh_hk,
         Lang::En => en,
+        Lang::Ru => ru,
     }
 }
 
 /// 应用名：窗口标题、托盘提示用
 pub fn app_name() -> &'static str {
-    pick("StarNexus 密钥管理工具", "StarNexus 密鑰管理工具", "StarNexus Key Tool")
+    pick("StarNexus 密钥管理工具", "StarNexus 密鑰管理工具", "StarNexus Key Tool", "StarNexus Key Tool")
 }
 
 #[cfg(test)]
@@ -94,6 +100,7 @@ mod tests {
         assert_eq!(l(&["zh-Hans-SG"]), Lang::ZhCn);
         assert_eq!(l(&["en-US", "zh-CN"]), Lang::En);
         assert_eq!(l(&["ja-JP"]), Lang::En);
+        assert_eq!(l(&["ru-RU", "en-US"]), Lang::Ru);
         assert_eq!(l(&[]), Lang::En);
     }
 
@@ -101,6 +108,7 @@ mod tests {
     fn parse_codes() {
         assert_eq!(parse("zh-HK"), Some(Lang::ZhHk));
         assert_eq!(parse("zh-TW"), Some(Lang::ZhHk));
+        assert_eq!(parse("ru"), Some(Lang::Ru));
         assert_eq!(parse("fr"), None);
     }
 }

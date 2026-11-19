@@ -6,6 +6,7 @@
 //   http://localhost:1420/?mock=legacy       旧脚本残留 + 官方登录
 //   http://localhost:1420/?mock=broken       配置文件损坏
 //   http://localhost:1420/?mock=nocodex      没装 Codex
+//   http://localhost:1420/?mock=conflict     Claude 两种密钥冲突：一键修复会弹出选择卡
 
 import type {
   AppState,
@@ -26,14 +27,43 @@ import type {
   HealthIssue,
   HealthRequest,
   ModelInfo,
+  LauncherScan,
+  LaunchTarget,
 } from "./types";
 
-export type Scenario = "configured" | "fresh" | "legacy" | "broken" | "nocodex";
+export type Scenario = "configured" | "fresh" | "legacy" | "broken" | "nocodex" | "conflict" | "thirdparty";
 
 export function activeScenario(): Scenario | null {
   if (!import.meta.env.DEV) return null;
   const m = new URLSearchParams(location.search).get("mock");
   return m ? (m as Scenario) : null;
+}
+
+// Optional setup preview: ?mock=configured&setup=missing|error|success.
+// A success preview starts missing and becomes installed on the next scan.
+let setupScans = 0;
+export function mockClientGuide(target: LaunchTarget) {
+  const mac = new URLSearchParams(location.search).get("platform") === "macos";
+  const claude = target.startsWith("claude"), cli = target.endsWith("cli");
+  const shell = mac ? "Terminal · zsh / bash" : "PowerShell 5.1 / 7+";
+  const command = cli ? claude
+    ? mac ? "curl -fsSL https://claude.ai/install.sh | bash" : "irm https://claude.ai/install.ps1 | iex"
+    : mac ? "npm install -g @openai/codex@latest" : "npm.cmd install -g @openai/codex@latest" : null;
+  const variants = command ? [{ shell, command }] : [];
+  if (!mac && cli) variants.push({ shell: "CMD", command: claude ? "curl -fsSL https://claude.ai/install.cmd -o install.cmd && install.cmd && del install.cmd" : "npm install -g @openai/codex@latest" });
+  return { platform: mac ? "macos" : "windows", url: claude ? "https://code.claude.com/docs/en/setup" : "https://github.com/openai/codex", shell, command, variants, canRun: cli, note: "" };
+}
+export async function mockLauncherScan(s: Scenario): Promise<LauncherScan> {
+  const mode = new URLSearchParams(location.search).get("setup");
+  const attempt = ++setupScans;
+  await new Promise(resolve => setTimeout(resolve, 350));
+  if (mode === "error" && attempt > 1) throw new Error("预览：安装检测暂时失败，请重试。");
+  const mac = new URLSearchParams(location.search).get("platform") === "macos";
+  return { platform: mac ? "macos" : "windows", installations: (["claude-desktop", "claude-cli", "codex-desktop", "codex-cli"] as const).map(target => {
+    const installed = mode === "missing" || mode === "error" || (mode === "success" && attempt === 1)
+      ? false : s !== "nocodex" || !target.startsWith("codex");
+    return { target, installed, path: installed ? (mac ? "/Applications/" + target : "C:\\Applications\\" + target + ".exe") : null, message: "界面预览示例" };
+  }) };
 }
 
 const HOME_CODEX = "C:\\Users\\PC\\.codex";
@@ -79,7 +109,7 @@ export function mockProfiles(s: Scenario): Profile[] {
 export function mockSaveProfile(s: Scenario, req: SaveProfileRequest): string {
   const list = mockProfiles(s);
   const old = list.find(p => p.id === req.id);
-  const id = old?.id || `p${Date.now()}`;
+  const id = old?.id || `p${crypto.randomUUID()}`;
   const next: Profile = {
     ...(old ?? { id, maskedKey: "", hasKey: false }),
     id, name: req.name || old?.name || "新密钥",
@@ -99,7 +129,8 @@ export function mockMarkConfigRead(tool: ToolId) { if (!configReadTools.includes
 /** 只「读取」同意过的工具，另一个和后端一样返回未读取占位 */
 export function mockEnvFor(s: Scenario, tools?: ToolId[]): Environment {
   const env = mockEnv(s);
-  const notRead = { homeExists: false, currentBaseUrl: null, currentModel: null, managedByUs: false, activeProfileId: null, unsavedGatewayKey: false, configurationStatus: "unknown" as const, statusMessage: "尚未读取（用户还没同意读取这个工具的配置）" };
+  for (const slot of ["codex", "claude", "claudeDesktop"] as const) Object.assign(env[slot], appliedConfig[slot]);
+  const notRead = { homeExists: false, currentBaseUrl: null, currentModel: null, managedByUs: false, activeProfileId: null, unsavedGatewayKey: false, currentKeyMasked: null, adoptable: false, configurationStatus: "unknown" as const, statusMessage: "尚未读取（用户还没同意读取这个工具的配置）" };
   if (tools && !tools.includes("claude")) env.claude = { ...env.claude, ...notRead, settingsState: "missing" as never };
   if (tools && !tools.includes("codex")) env.codex = { ...env.codex, ...notRead, configState: "missing" as never, authState: "Missing", currentReasoningEffort: null, residue: [] };
   return env;
@@ -133,29 +164,37 @@ export function mockEnvOverrides(s: Scenario): string[] {
 
 export async function mockAdopt(s: Scenario, tool: ToolId): Promise<AdoptResult> {
   await new Promise(r => setTimeout(r, 600));
+  if (s === "thirdparty" && tool === "codex") {
+    const id = mockSaveProfile(s, { id: "", name: "relay.example.com", apiKey: "sk-relay-7c21", codexModel: "gpt-5.4", codexEffort: "", claudeModel: "", codexBaseUrl: "https://relay.example.com/v1" } as never);
+    adopted[tool] = id;
+    return { id, name: "relay.example.com", existed: false };
+  }
   const id = mockSaveProfile(s, { id: "", name: `${tool === "claude" ? "Claude" : "Codex"} 配置里的密钥`, apiKey: "sk-preview-9f3e", codexModel: "", codexEffort: "", claudeModel: tool === "claude" ? "claude-opus-4-8" : "" });
   adopted[tool] = id;
   return { id, name: `${tool === "claude" ? "Claude" : "Codex"} 配置里的密钥`, existed: false };
 }
 
-/** 场景数据里 unsavedGatewayKey 可省略，默认 false */
-type Loose<T> = Omit<T, "unsavedGatewayKey"> & { unsavedGatewayKey?: boolean };
+/** 场景数据里 unsavedGatewayKey / currentKeyMasked / adoptable 可省略 */
+type Loose<T> = Omit<T, "unsavedGatewayKey" | "currentKeyMasked" | "adoptable"> & { unsavedGatewayKey?: boolean; currentKeyMasked?: string | null; adoptable?: boolean };
+const fill = <T extends { unsavedGatewayKey?: boolean; currentKeyMasked?: string | null; adoptable?: boolean }>(e: T) =>
+  ({ ...e, unsavedGatewayKey: e.unsavedGatewayKey ?? false, currentKeyMasked: e.currentKeyMasked ?? null, adoptable: e.adoptable ?? false });
 
 export function mockEnv(s: Scenario): Environment {
   const base = mockEnvBase(s);
   const env: Environment = {
-    codex: { ...base.codex, unsavedGatewayKey: base.codex.unsavedGatewayKey ?? false },
-    claude: { ...base.claude, unsavedGatewayKey: base.claude.unsavedGatewayKey ?? false },
+    codex: fill(base.codex),
+    claude: fill(base.claude),
     // 桌面版的第三方推理配置：演示里一律还没启用（用官方登录）
     claudeDesktop: {
       ...base.claude, home: "C:\Users\you\AppData\Local\Claude-3p", settingsState: "missing",
       currentBaseUrl: null, currentModel: null, managedByUs: false, activeProfileId: null, unsavedGatewayKey: false,
+      currentKeyMasked: null, adoptable: false,
       configurationStatus: "official", statusMessage: "未启用第三方推理，使用 Claude 官方登录",
     },
   };
   for (const tool of ["claude", "codex"] as const) {
     const id = adopted[tool];
-    if (id) env[tool] = { ...env[tool], activeProfileId: id, unsavedGatewayKey: false, configurationStatus: "configured" } as never;
+    if (id) env[tool] = { ...env[tool], activeProfileId: id, unsavedGatewayKey: false, adoptable: false, configurationStatus: "configured" } as never;
   }
   return env;
 }
@@ -185,6 +224,7 @@ function mockEnvBase(s: Scenario): { codex: Loose<CodexEnv>; claude: Loose<Claud
   };
 
   switch (s) {
+    case "conflict":
     case "configured":
       return {
         codex: {
@@ -200,6 +240,28 @@ function mockEnvBase(s: Scenario): { codex: Loose<CodexEnv>; claude: Loose<Claud
           activeProfileId: "p1",
           configurationStatus: "configured" as const,
           statusMessage: "用户配置文件已匹配此密钥；运行中的客户端尚未验证",
+        },
+        claude: claudeConfigured,
+      };
+
+    // Codex 正在用第三方中转站的密钥，没保存在本工具
+    case "thirdparty":
+      return {
+        codex: {
+          homeExists: true,
+          home: HOME_CODEX,
+          configState: "ok",
+          authState: "ApiKeyOnly",
+          currentBaseUrl: "https://relay.example.com/v1",
+          currentModel: "gpt-5.4",
+          currentReasoningEffort: "medium",
+          residue: [],
+          managedByUs: false,
+          activeProfileId: null,
+          currentKeyMasked: "sk-••••••••7c21",
+          adoptable: true,
+          configurationStatus: "custom" as const,
+          statusMessage: "使用其他服务地址",
         },
         claude: claudeConfigured,
       };
@@ -240,7 +302,7 @@ function mockEnvBase(s: Scenario): { codex: Loose<CodexEnv>; claude: Loose<Claud
           statusMessage: "尚未确认客户端配置和登录状态",
         },
         // 旧版手动配过 AI：配置里有 Key，但没保存在本工具
-        claude: { ...claudeConfigured, managedByUs: false, activeProfileId: null, unsavedGatewayKey: true, configurationStatus: "unknown" as const, statusMessage: "网关地址已配置，但凭据未匹配本地密钥；未验证客户端运行状态" },
+        claude: { ...claudeConfigured, managedByUs: false, activeProfileId: null, unsavedGatewayKey: true, currentKeyMasked: "sk-••••••••9f3e", adoptable: true, configurationStatus: "unknown" as const, statusMessage: "网关地址已配置，但凭据未匹配本地密钥；未验证客户端运行状态" },
       };
 
     case "broken":
@@ -294,6 +356,19 @@ export function mockKeyStatus(): KeyStatus[] {
   ];
 }
 
+const importedIds = new Map<number, string>();
+
+export function mockImportTokens(scenario: Scenario, ids: number[]) {
+  const profileIds: string[] = [], created: string[] = [], unchanged: string[] = [];
+  for (const token of mockTokens().filter(token => token.usable && ids.includes(token.id))) {
+    const existing = mockProfiles(scenario).find(profile => profile.id === importedIds.get(token.id) || (token.linkedProfile && !profile.custom && profile.name === token.linkedProfile));
+    if (existing) { profileIds.push(existing.id); unchanged.push(existing.name); continue; }
+    const id = mockSaveProfile(scenario, { id: "", name: token.name, apiKey: "preview-only", codexModel: "", claudeModel: "", codexEffort: "medium" });
+    importedIds.set(token.id, id); profileIds.push(id); created.push(token.name);
+  }
+  return { profileIds, created, unchanged, updated: [], skipped: [] };
+}
+
 export function mockTokens(): GatewayToken[] {
   return [
     { id: 1, name: "默认令牌", usable: true, note: "", linkedProfile: "主号" },
@@ -325,13 +400,35 @@ export function mockTest(): TestResult {
   return { ok: true, message: `连上了，可以用 ${models.length} 个模型`, models };
 }
 
+/** 预览里「修复」过的工具：写入配置后体检不再报可修复的问题；还原备份后恢复原样 */
+const repaired = new Set<ToolId>();
+const appliedConfig: Partial<Record<keyof Environment, object>> = {};
+export function mockRestore() { repaired.clear(); for (const slot of ["codex", "claude", "claudeDesktop"] as const) delete appliedConfig[slot]; }
+
+export function mockRevertOfficial(codex: boolean, claude: boolean, claudeDesktop: boolean) {
+  for (const slot of ["codex", "claude", "claudeDesktop"] as const) {
+    if (!({ codex, claude, claudeDesktop })[slot]) continue;
+    appliedConfig[slot] = { configurationStatus: "official", activeProfileId: null, currentModel: null, currentBaseUrl: null, managedByUs: false, unsavedGatewayKey: false };
+  }
+  return "20260918-183012";
+}
+
 export function mockApply(req: ApplyRequest): ApplyResult {
+  for (const slot of ["codex", "claude", "claudeDesktop"] as const) {
+    if (!(slot === "codex" ? req.configureCodex : slot === "claude" ? req.configureClaude : req.configureClaudeDesktop)) continue;
+    appliedConfig[slot] = { configurationStatus: "configured", activeProfileId: req.profileId,
+      currentModel: (slot === "codex" ? req.model : req.claudeModel) || null,
+      currentReasoningEffort: req.reasoningEffort, managedByUs: true, unsavedGatewayKey: false };
+  }
+  if (req.configureClaude || req.configureClaudeDesktop) repaired.add("claude");
+  if (req.configureCodex) repaired.add("codex");
   return {
     backupId: "20260918-183012",
     wroteCodexConfig: req.configureCodex,
     wroteCodexAuth: req.configureCodex,
     wroteClaudeSettings: req.configureClaude,
     wroteClaudeDesktop: !!req.configureClaudeDesktop,
+    officialLoginChosen: !!req.configureClaudeDesktop,
     paths: [
       ...(req.configureCodex
         ? [`${HOME_CODEX}\\config.toml`, `${HOME_CODEX}\\auth.json`]
@@ -344,6 +441,15 @@ export function mockApply(req: ApplyRequest): ApplyResult {
 
 /** 体检假数据：broken 场景报文件损坏，legacy 场景报别名不全和环境变量覆盖 */
 export function mockHealth(s: Scenario, req: HealthRequest): HealthIssue[] {
+  // 修复过的：只剩写配置解决不了的提醒
+  if (repaired.has(req.tool)) return mockHealthRaw(s, req).filter(i => i.fix === "none" || i.fix === "keys" || i.fix === "settings");
+  return mockHealthRaw(s, req);
+}
+function mockHealthRaw(s: Scenario, req: HealthRequest): HealthIssue[] {
+  if (s === "conflict" && req.tool === "claude") return [
+    { id: "C2", level: "error", text: "模型别名不全，切换模型会报 404", fix: "rewrite" },
+    { id: "C4", level: "warn", text: "同时设置了两种密钥，可能冲突", fix: "rewrite" },
+  ];
   if (s === "broken") return req.tool === "codex"
     ? [{ id: "X1", level: "error", text: "Codex 配置文件格式损坏", fix: "rebuild" }]
     : [{ id: "C1", level: "error", text: "Claude 配置文件格式损坏，需手动修复", fix: "none" }];

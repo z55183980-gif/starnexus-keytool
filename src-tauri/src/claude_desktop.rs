@@ -14,7 +14,7 @@ use crate::error::{AppError, Result};
 use serde_json::{Map, Value};
 use std::path::PathBuf;
 
-pub const SEALED_PREFIX: &str = "__sealed__:v1:";
+pub const SEALED_PREFIX: &str = "__sealed__:";
 pub const KEY_PROVIDER: &str = "inferenceProvider";
 pub const KEY_BASE_URL: &str = "inferenceGatewayBaseUrl";
 pub const KEY_API_KEY: &str = "inferenceGatewayApiKey";
@@ -54,7 +54,40 @@ pub fn meta_path() -> Result<PathBuf> {
     Ok(library_dir()?.join("_meta.json"))
 }
 
-fn valid_id(id: &str) -> bool {
+/// 桌面版自己的应用配置（和 configLibrary 同在第三方数据目录下）。
+/// 用户在桌面版里选「用 Claude.ai 登录」时，它把 `deploymentMode: "1p"` 记在这里，
+/// 之后即使第三方推理配置齐全也按官方登录启动。
+pub fn app_config_path() -> Result<PathBuf> {
+    Ok(data_dir()?.join("claude_desktop_config.json"))
+}
+
+pub const KEY_DEPLOYMENT_MODE: &str = "deploymentMode";
+
+/// 应用配置里是否记着用户选了官方登录（和桌面版一样，只认 "1p"，读不出来按没选）。
+/// 组织下发的策略可以强制第三方模式而忽略这个选择，本工具不读策略，按个人设备处理。
+pub fn chose_official_login(app_config: Option<&str>) -> bool {
+    app_config
+        .and_then(|t| serde_json::from_str::<Value>(t).ok())
+        .is_some_and(|v| v.get(KEY_DEPLOYMENT_MODE).and_then(Value::as_str) == Some("1p"))
+}
+
+/// 把应用配置改成第三方模式（和桌面版自己「切换到第三方推理」写的一样），其他项原样保留
+pub fn with_third_party_mode(app_config: Option<&str>) -> Result<String> {
+    let mut m = parse_object(app_config).map_err(|e| {
+        AppError::JsonParse(format!("Claude 桌面版的应用配置有格式问题：{e}。原文件没有被改动"))
+    })?;
+    m.insert(KEY_DEPLOYMENT_MODE.into(), Value::from("3p"));
+    Ok(serde_json::to_string_pretty(&Value::Object(m))?)
+}
+
+pub fn official_login_chosen() -> bool {
+    app_config_path()
+        .ok()
+        .and_then(|p| crate::atomic::read_text_optional(&p).ok().flatten())
+        .is_some_and(|t| chose_official_login(Some(&t)))
+}
+
+pub(crate) fn valid_id(id: &str) -> bool {
     id.len() == 36
         && id
             .bytes()
@@ -123,8 +156,8 @@ fn new_id() -> Result<String> {
 }
 
 /// 写入目标：已有选中的配置就写它；配置库还没建就新建一份 Default 并选中（和桌面版自己建的一样）
-pub fn target_for_write() -> Result<(PathBuf, Option<String>)> {
-    match applied()? {
+pub fn target_for_write(meta: Option<&str>) -> Result<(PathBuf, Option<String>)> {
+    match parse_meta(meta) {
         Applied::Config(path) => Ok((path, None)),
         Applied::Unusable(reason) => Err(AppError::Other(reason)),
         Applied::None => {
@@ -278,10 +311,9 @@ pub fn running() -> bool {
         let script = "@(Get-Process -Name claude -ErrorAction SilentlyContinue | Where-Object { $_.Path -match '\\\\WindowsApps\\\\Claude_|\\\\AnthropicClaude\\\\|\\\\Programs\\\\Claude\\\\' }).Count";
         let root = std::env::var_os("SystemRoot").unwrap_or_else(|| "C:\\Windows".into());
         let ps = PathBuf::from(root).join("System32/WindowsPowerShell/v1.0/powershell.exe");
-        return std::process::Command::new(ps)
+        return crate::process::output(std::process::Command::new(ps)
             .args(["-NoProfile", "-NonInteractive", "-Command", script])
-            .creation_flags(0x08000000)
-            .output()
+            .creation_flags(0x08000000), crate::process::HELPER_TIMEOUT)
             .ok()
             .and_then(|o| {
                 String::from_utf8_lossy(&o.stdout)
@@ -293,9 +325,8 @@ pub fn running() -> bool {
     }
     #[cfg(target_os = "macos")]
     {
-        return std::process::Command::new("/usr/bin/pgrep")
-            .args(["-f", "/Claude.app/Contents/MacOS/Claude"])
-            .output()
+        return crate::process::output(std::process::Command::new("/usr/bin/pgrep")
+            .args(["-f", "/Claude.app/Contents/MacOS/Claude"]), crate::process::HELPER_TIMEOUT)
             .is_ok_and(|o| o.status.success());
     }
     #[allow(unreachable_code)]
@@ -364,6 +395,26 @@ mod tests {
         assert_eq!(v, serde_json::json!({ "builtinBrowserEnabled": true }));
         assert_eq!(revert(Some(&out)).unwrap(), None);
         assert_eq!(revert(None).unwrap(), None);
+    }
+
+    #[test]
+    fn official_login_choice_is_only_an_explicit_1p() {
+        assert!(chose_official_login(Some(r#"{"deploymentMode":"1p","preferences":{}}"#)));
+        assert!(!chose_official_login(Some(r#"{"deploymentMode":"3p"}"#)));
+        assert!(!chose_official_login(Some(r#"{"preferences":{}}"#)));
+        assert!(!chose_official_login(Some("{oops")));
+        assert!(!chose_official_login(None));
+    }
+
+    #[test]
+    fn switching_to_third_party_keeps_other_settings() {
+        let out = with_third_party_mode(Some(r#"{"deploymentMode":"1p","preferences":{"a":1},"coworkUserFilesPath":"x"}"#)).unwrap();
+        let v: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v, serde_json::json!({ "deploymentMode": "3p", "preferences": { "a": 1 }, "coworkUserFilesPath": "x" }));
+        assert!(!chose_official_login(Some(&out)));
+        assert_eq!(serde_json::from_str::<Value>(&with_third_party_mode(None).unwrap()).unwrap(), serde_json::json!({ "deploymentMode": "3p" }));
+        assert!(with_third_party_mode(Some("{oops")).is_err());
+        assert!(with_third_party_mode(Some("[1]")).is_err());
     }
 
     #[test]
