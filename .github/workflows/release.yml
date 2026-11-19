@@ -301,7 +301,7 @@ jobs:
           [ -n "$APP" ] || { echo "::error::没找到 .app"; exit 1; }
 
           /usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$APP/Contents/Info.plist" | grep -Fx 'com.dkby.starnexus.keytool'
-          lipo -verify_arch x86_64 arm64 "$APP/Contents/MacOS/starnexus-keytool"
+          lipo "$APP/Contents/MacOS/starnexus-keytool" -verify_arch x86_64 arm64
           # 把公证票据钉进 .app，这样用户断网也能通过校验
           if [ "${{ steps.signing.outputs.enabled }}" = "true" ]; then
             xcrun stapler staple "$APP"
