@@ -34,8 +34,8 @@
 .readiness-card .repair-ai-note { font-size: 11px; color: #7a8599; }
 
 /* 主按钮：修复用 AI 的品牌色，和「启动」区分开；次要动作是一行轻文字 */
-.launcher-pages .tool-hero .launch-button.is-repair { color: #fff !important; background: linear-gradient(180deg, #e2774f, #d0603a) !important; border-color: transparent !important; box-shadow: inset 0 1px 0 rgba(255, 255, 255, .35), 0 5px 12px rgba(208, 96, 58, .22) !important; }
-.launcher-pages .tool-hero .launch-button.is-repair:hover:not(:disabled) { background: linear-gradient(180deg, #e8835c, #d66a44) !important; }
+.launcher-pages .tool-hero .launch-button.is-repair { color: #fff !important; background: linear-gradient(180deg, #bf532d, #b54a29) !important; border-color: transparent !important; box-shadow: inset 0 1px 0 rgba(255, 255, 255, .35), 0 5px 12px rgba(208, 96, 58, .22) !important; }
+.launcher-pages .tool-hero .launch-button.is-repair:hover:not(:disabled) { background: linear-gradient(180deg, #b54a29, #a24224) !important; }
 
 /* 修复卡：进度 / 选择，占住启动卡片的正文 */
 .repair-card { display: flex; flex-direction: column; gap: 12px; padding: 16px; border-radius: 16px; background: rgba(255, 255, 255, .66); border: 1px solid rgba(40, 57, 90, .09); animation: repair-in .18s ease-out; }

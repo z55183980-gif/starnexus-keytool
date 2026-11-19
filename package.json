@@ -7,7 +7,7 @@
     "url": "https://github.com/z55183980-gif/starnexus-keytool.git"
   },
   "homepage": "https://dkby.com/keys",
-  "version": "0.2.9",
+  "version": "0.2.10",
   "type": "module",
   "scripts": {
     "dev": "vite",

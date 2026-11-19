@@ -5,17 +5,32 @@
 .update-language { display: flex; align-items: center; justify-content: flex-end; gap: 8px; margin-bottom: 18px; font-size: 12px; color: #58708b; }
 .update-language select { min-width: 116px; padding: 7px 28px 7px 10px; border: 1px solid #d8e0ea; border-radius: 8px; color: #26364b; background: #fff; font: inherit; cursor: pointer; }
 .update-language select:focus-visible { outline: 2px solid #80b7bb; outline-offset: 2px; }
-.update-dismiss { font-size: 12px; border: 0; background: none; color: #58708b; cursor: pointer; }
 .update-panel { padding: 16px; border: 1px solid #dbe3ed; border-radius: 16px; background: #ffffffaa; font-size: 13px; color: #26364b; }
 .update-panel h2 { margin: 0 0 8px; font-size: 16px; }
 .update-gate .update-panel { padding: 0; border: 0; background: none; }
-.update-version { color: #65758c; font-size: 12px; }
+.update-version { color: #53657a; font-size: 12px; }
 .update-notes { max-height: 140px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; line-height: 1.6; }
-.update-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 14px; }
-.update-actions button { padding: 9px 12px; border-radius: 10px; }
+.update-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 14px; }
+.update-actions button { max-width: 100%; padding: 9px 12px; border-radius: 10px; white-space: normal; }
+.update-panel .update-actions .update-download { display: inline-flex; align-items: center; gap: 5px; min-height: 36px; margin-inline-end: auto; padding: 4px 2px; background: transparent; color: #405b71; border: 0; box-shadow: none; font-size: 12px; }
+.update-download .ui-icon { width: 13px; height: 13px; }
+.update-download:hover:not(:disabled) { text-decoration: underline; }
 .update-warning { color: #85622c; }
 .update-error { color: #ab3434; overflow-wrap: anywhere; }
-.update-panel progress { width: 100%; accent-color: #33878a; }
-.update-banner { position: fixed; top: 14px; left: 50%; transform: translateX(-50%); width: min(460px, calc(100% - 32px)); z-index: 100; padding: 8px; border-radius: 20px; background: #f6f9ff; box-shadow: 0 10px 36px #26364b35; }
-.update-dismiss { display: block; margin: 10px 0 2px auto; }
+.update-progress { margin-top: 14px; }
+.update-progress p { display: flex; justify-content: space-between; gap: 8px; font-variant-numeric: tabular-nums; }
+.update-progress progress { width: 100%; height: 7px; accent-color: #087b65; }
+.update-banner { position: fixed; top: 14px; left: 50%; transform: translateX(-50%); width: min(420px, calc(100% - 28px)); max-height: calc(100dvh - 28px); overflow: auto; z-index: 100; border: 1px solid #d4e0df; border-radius: 18px; background: #fff; box-shadow: 0 12px 36px #26364b29, 0 2px 6px #26364b0d; }
+.update-banner .update-panel { padding: 16px 18px; border: 0; background: transparent; }
+.update-banner .update-heading { display: flex; align-items: center; gap: 10px; margin: 0; font-size: 17px; line-height: 1.35; overflow-wrap: anywhere; }
+.update-mark { flex: none; display: grid; place-items: center; width: 32px; height: 32px; border-radius: 10px; background: #e4f3ee; color: #086956; }
+.update-banner p, .update-banner .update-notes { margin: 8px 0 0; overflow-wrap: anywhere; }
+.update-banner .update-notes { color: #34465a; font-size: 14px; }
+.update-banner .update-actions { padding-top: 12px; border-top: 1px solid #e5ebe9; }
+.update-banner .update-actions .primary, .update-banner .update-actions .update-later { min-height: 38px; padding: 8px 14px; border: 0; border-radius: 10px; box-shadow: none; }
+.update-banner .update-actions .primary { background: #087b65; color: #fff; }
+.update-banner .update-actions .primary:hover:not(:disabled) { background: #066551; }
+.update-banner .update-later { background: #eff2f3; color: #34465a; }
+.update-banner .update-later:hover:not(:disabled) { background: #e3e9ea; }
+.update-banner .update-error { padding: 8px 10px; border-radius: 8px; background: #fcf0ed; }
 .update-proxy { display: flex; align-items: center; gap: 6px; margin-top: 16px; font-size: 12px; color: #65758c; }

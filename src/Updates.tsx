@@ -3,6 +3,7 @@ import { Channel, invoke } from "@tauri-apps/api/core";
 import * as api from "./api";
 import * as mock from "./mock";
 import { LANGS, setLang, t, useLang } from "./i18n";
+import { UiIcon } from "./UiIcon";
 import { UpdateController, type AvailableUpdate, type ClientPolicy, type UpdateProgress, type UpdateView } from "./updateFlow";
 import "./Updates.css";
 
@@ -80,35 +81,38 @@ async function openDownload() {
   await invoke("open_update_download");
 }
 
-export function UpdatePanel({ mandatory = false }: { mandatory?: boolean }) {
+export function UpdatePanel({ mandatory = false, onDismiss }: { mandatory?: boolean; onDismiss?: () => void }) {
   useLang();
   const { state, controller, busy } = useUpdates();
   const [linkError, setLinkError] = useState("");
   const active = state.phase !== "idle";
   const progress = state.progress;
   const percent = progress?.total ? Math.min(100, Math.round(progress.downloaded / progress.total * 100)) : null;
+  const versionTitle = state.update && t("新版 {version}", { version: state.update.version });
+  const phaseLabel = t(state.phase === "installing" ? "正在安装更新…" : state.phase === "restarting" ? "正在重启应用…" : "正在下载更新…");
   return <section className="update-panel" aria-label={t("应用更新")}>
-    {!mandatory && <h2>{t("应用更新")}</h2>}
-    {state.policy && <p className="update-version">{t("当前版本 {version}", { version: state.policy.currentVersion })}</p>}
+    {!mandatory && <h2 className="update-heading">{onDismiss && <span className="update-mark"><UiIcon name="refresh" /></span>}{onDismiss ? versionTitle : t("应用更新")}</h2>}
+    {!onDismiss && !mandatory && state.policy && <p className="update-version">{t("当前版本 {version}", { version: state.policy.currentVersion })}</p>}
     {state.policy?.config.notice && <p>{state.policy.config.notice}</p>}
     {state.update && <>
-      <strong>{t("发现新版本 {version}", { version: state.update.version })}</strong>
+      {!onDismiss && (!mandatory || state.update.version !== state.policy?.config.min_client_version) && <strong>{versionTitle}</strong>}
       {state.update.notes && <pre className="update-notes">{state.update.notes}</pre>}
-      {/Win/i.test(navigator.platform) && <p className="update-version">{t("便携版更新后将转为安装版。")}</p>}
+      {/Win/i.test(navigator.platform) && <p className="update-version">{t("便携版将转为安装版。")}</p>}
     </>}
     {!state.update && state.checked && !state.checking && !state.error && <p>{t(mandatory ? "暂无可用更新，请重试或手动下载。" : "已是最新版本")}</p>}
     {state.policy?.warning && <p className="update-warning">{t(state.policy.warning)}</p>}
     {(state.error || linkError) && <p className="update-error" role="alert">{t(state.error || linkError)}</p>}
-    {active && <div role="status" aria-live="polite">
-      <p>{t(state.phase === "installing" ? "正在安装更新…" : state.phase === "restarting" ? "正在重启应用…" : "正在下载更新…")}{state.phase === "downloading" && percent !== null ? ` ${percent}%` : ""}</p>
-      <progress max={100} value={percent ?? undefined} />
+    {active && <div className="update-progress" role="status">
+      <p>{phaseLabel}{state.phase === "downloading" && percent !== null && <span>{percent}%</span>}</p>
+      <progress aria-label={phaseLabel} max={100} value={state.phase === "downloading" ? percent ?? undefined : undefined} />
     </div>}
     {busy && <p>{t("当前操作完成后即可安装更新")}</p>}
-    <div className="update-actions">
-      {state.update && <button className="primary" disabled={active || state.checking || busy} onClick={() => void controller.install()}>{t("下载、安装并重启")}</button>}
-      <button disabled={active || state.checking || busy} onClick={() => void controller.check()}>{t(state.checking ? "检查中…" : "检查更新")}</button>
-      <button disabled={active} onClick={() => void openDownload().catch(() => setLinkError(t("无法打开下载页面，请检查默认浏览器")))}>{t("手动下载")}</button>
-    </div>
+    {!active && <div className="update-actions">
+      <button className="update-download" onClick={() => { setLinkError(""); void openDownload().catch(() => setLinkError("无法打开下载页面，请检查默认浏览器")); }}>{t("手动下载")}<UiIcon name="external" /></button>
+      {((!onDismiss && !mandatory) || !state.update || state.error) && <button disabled={state.checking || busy} onClick={() => void controller.check()}>{t(state.checking ? "检查中…" : "检查更新")}</button>}
+      {onDismiss && <button className="update-later" onClick={onDismiss}>{t("稍后")}</button>}
+      {state.update && <button className="primary" disabled={state.checking || busy} onClick={() => void controller.install()}>{t("更新并重启")}</button>}
+    </div>}
     {mandatory && <label className="update-proxy"><ProxyChoice /></label>}
   </section>;
 }
@@ -122,8 +126,8 @@ export function UpdateBanner() {
   const { state } = useUpdates();
   const [dismissed, setDismissed] = useState<string | null>(null);
   if (!state.update || state.policy?.required || dismissed === state.update.version) return null;
-  return <aside className="update-banner">
-    <UpdatePanel />
-    {state.phase === "idle" && <button className="update-dismiss" onClick={() => setDismissed(state.update!.version)}>{t("稍后提醒")}</button>}
+  const { version } = state.update;
+  return <aside className="update-banner" aria-label={t("应用更新")}>
+    <UpdatePanel onDismiss={() => setDismissed(version)} />
   </aside>;
 }

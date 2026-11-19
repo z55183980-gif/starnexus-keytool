@@ -230,8 +230,9 @@ button.primary:disabled, .launcher-pages button.primary:disabled, .key-actions >
     border-color: transparent !important;
     box-shadow: inset 0 1px 0 rgba(255,255,255,.7), 0 3px 10px rgba(36,52,80,.07) !important;
   }
-  :is(.launcher-app, .account-dialog) button:not(.nav-tab, .launch-mode-tab, .lang-tab, .install-inline-action):not(.danger):hover:not(:disabled) {
-    background: var(--button-hover-bg, rgba(255,255,255,.9)) !important;
+  /* Let each component's hover palette take precedence over the glass fallback. */
+  :where(.launcher-app, .account-dialog) button:hover:not(:disabled, .nav-tab, .launch-mode-tab, .lang-tab, .install-inline-action, .danger) {
+    background: var(--button-hover-bg, rgba(255,255,255,.9));
     filter: none;
   }
   /* Text links and list rows brighten without gaining a raised button container. */

@@ -1,6 +1,6 @@
 [package]
 name = "dbkey"
-version = "0.2.9"
+version = "0.2.10"
 description = "StarNexus Claude / Codex 密钥管理"
 authors = ["StarNexus"]
 edition = "2021"

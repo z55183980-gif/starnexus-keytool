@@ -84,7 +84,6 @@ jobs:
             echo "::error::Configure the dedicated StarNexus updater key pair (see README.md)"
             exit 1
           fi
-          node -e "const fs=require('node:fs');const p='src-tauri/tauri.conf.json';const c=JSON.parse(fs.readFileSync(p));c.plugins.updater.pubkey=process.env.STARNEXUS_UPDATER_PUBLIC_KEY;c.bundle.createUpdaterArtifacts=true;fs.writeFileSync(p,JSON.stringify(c))"
 
       - uses: actions/setup-node@v4
         with:
@@ -112,6 +111,11 @@ jobs:
       - name: Test
         working-directory: src-tauri
         run: cargo test --all-targets --locked
+
+      - name: Configure signed updater artifacts
+        shell: bash
+        run: |
+          node -e "const fs=require('node:fs');const p='src-tauri/tauri.conf.json';const c=JSON.parse(fs.readFileSync(p));c.plugins.updater.pubkey=process.env.STARNEXUS_UPDATER_PUBLIC_KEY;c.bundle.createUpdaterArtifacts=true;fs.writeFileSync(p,JSON.stringify(c))"
 
       # —————— 签名：有证书就签，没有就出未签名包 ——————
       # 未签名包只够自己测（要手动去掉隔离属性），不能发给用户。
