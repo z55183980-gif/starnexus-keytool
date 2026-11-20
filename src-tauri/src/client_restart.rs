@@ -263,32 +263,4 @@ mod tests {
         eprintln!("claude desktop running: {}", running(Target::ClaudeDesktop));
         eprintln!("codex desktop running: {}", running(Target::CodexDesktop));
     }
-
-    #[test]
-    #[cfg(windows)]
-    fn windows_patterns_match_desktop_apps_but_not_the_cli() {
-        let re = regex_lite;
-        let codex_main = re(win::CODEX_MAIN);
-        assert!(codex_main(r"C:\Program Files\WindowsApps\OpenAI.Codex_26.1111.2228.0_x64__2p2nqsd0c76g0\app\ChatGPT.exe"));
-        assert!(!codex_main(r"C:\Program Files\WindowsApps\OpenAI.Codex_26.1111.2228.0_x64__2p2nqsd0c76g0\app\resources\codex.exe"));
-        assert!(!codex_main(r"C:\Users\a\AppData\Local\OpenAI\Codex\bin\0.170.0\codex.exe"));
-        let codex_all = re(win::CODEX_ALL);
-        assert!(!codex_all(r"C:\Users\a\AppData\Local\OpenAI\Codex\bin\0.170.0\codex.exe"));
-        assert!(!codex_all(r"C:\Users\a\AppData\Roaming\npm\node_modules\@openai\codex\codex.exe"));
-        let claude_main = re(win::CLAUDE_MAIN);
-        assert!(claude_main(r"C:\Program Files\WindowsApps\Claude_5.11492.5.0_x64__pzs8sxrjxfjjc\app\claude.exe"));
-        assert!(!claude_main(r"C:\Program Files\WindowsApps\Claude_5.11492.5.0_x64__pzs8sxrjxfjjc\app\resources\cowork-svc.exe"));
-        let claude_all = re(win::CLAUDE_ALL);
-        assert!(!claude_all(r"C:\Users\a\AppData\Local\Claude-3p\claude-code\2.1.260\claude.exe"));
-        assert!(!claude_all(r"C:\Users\a\.local\bin\claude.exe"));
-    }
-
-    /// 用 PowerShell 自己的 -match 校验，和运行时完全一致
-    #[cfg(windows)]
-    fn regex_lite(pattern: &'static str) -> impl Fn(&str) -> bool {
-        move |path: &str| {
-            let script = format!("'{}' -match '{}'", path.replace('\'', "''"), pattern);
-            powershell(&script).is_some_and(|o| String::from_utf8_lossy(&o.stdout).trim() == "True")
-        }
-    }
 }

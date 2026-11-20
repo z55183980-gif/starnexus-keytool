@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { configurationMatches, launchWithConfiguration, saveLaunchConfiguration } from '../src/launchFlow.ts';
+import { configurationMatches, desktopModels, launchWithConfiguration, saveLaunchConfiguration } from '../src/launchFlow.ts';
 
 const request = { profileId:'key-1', baseUrl:'https://gateway.dkby.com/v1', model:'model', reasoningEffort:'medium', claudeModel:'claude-model' };
 const config = (status = 'official', id = null, currentModel = 'model') => ({ configurationStatus:status, activeProfileId:id, currentModel, currentReasoningEffort:'medium' });
@@ -124,6 +124,20 @@ test('Claude alias changes trigger a write even if the main model matches', asyn
   const value = config('configured','key-1','claude-model');
   const f = fixture([environment({...value,configuredModels:['old','','']}),environment({...value,configuredModels:['new','','']})], 'claude','cli',{claudeOpusModel:'new'});
   await f.save(); assert.equal(f.applied.length,1);
+});
+
+test('Claude desktop verifies the written list including gateway extras, and rewrites an old list without them', async () => {
+  const extras = { claudeOpusModel:'claude-model', claudeSonnetModel:'sonnet', claudeHaikuModel:'sonnet', claudeDesktopExtraModels:['fable','sonnet'] };
+  assert.deepEqual(desktopModels({ claudeModel:'claude-model', ...extras }), ['claude-model','sonnet','fable']);
+  const value = config('configured','key-1','claude-model');
+  const written = environment({...value,configuredModels:['claude-model','sonnet','fable']});
+  // 老版本写的列表缺附加模型：要重写；写完带上附加模型，核对通过（不再误报「被外部配置覆盖」）
+  const f = fixture([environment({...value,configuredModels:['claude-model','sonnet']}),written],'claude','desktop',extras);
+  await f.save(); assert.deepEqual(f.calls,['scan','apply','scan']);
+  assert.deepEqual(f.applied[0].claudeDesktopExtraModels,['fable','sonnet']);
+  // 已经是完整列表：不写，直接启动
+  const ready = fixture([written],'claude','desktop',extras);
+  await ready.launch(); assert.deepEqual(ready.calls,['validate','scan','launch']);
 });
 
 test('button readiness uses the correct configuration, model and reasoning effort', () => {

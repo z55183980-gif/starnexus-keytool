@@ -26,6 +26,10 @@ pub const KEY_DEPRECATED_SMALL_FAST: &str = "ANTHROPIC_SMALL_FAST_MODEL";
 /// 走 x-api-key 头，给 Anthropic 官方 API 用。
 /// 官方文档：和 AUTH_TOKEN 只能设一个，同时存在时谁生效取决于端点和版本。
 pub const KEY_LEGACY_API_KEY: &str = "ANTHROPIC_API_KEY";
+/// 让 `/model` 列表按网关的 `/v1/models` 补全（官方默认关）。不开的话列表只有客户端自带的
+/// 几行，网关上的 Fable、旧版 Sonnet 等只能手打 `/model <id>`。
+/// 官方默认关是怕共用密钥的网关把所有模型露给所有人；我们每人一把密钥，没有这个顾虑。
+pub const KEY_GATEWAY_MODEL_DISCOVERY: &str = "CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY";
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -45,6 +49,8 @@ pub struct ClaudeSettings {
     pub opus_model: String,
     pub sonnet_model: String,
     pub haiku_model: String,
+    /// 打开网关模型发现。只给 StarNexus 网关开；false 表示不碰这一项（其他服务的网关不一定支持）
+    pub gateway_model_discovery: bool,
 }
 
 pub fn inspect(text: Option<&str>) -> SettingsState {
@@ -104,6 +110,10 @@ pub fn merge(text: Option<&str>, s: &ClaudeSettings) -> Result<String> {
         }
     }
 
+    if s.gateway_model_discovery {
+        env.insert(KEY_GATEWAY_MODEL_DISCOVERY.into(), Value::String("1".into()));
+    }
+
     // 废弃变量：留着不起作用，还会让人以为设置生效了
     env.remove(KEY_DEPRECATED_SMALL_FAST);
     // 和 AUTH_TOKEN 只能存在一个，否则谁生效不确定
@@ -155,6 +165,7 @@ pub fn revert(text: Option<&str>) -> Result<Option<String>> {
             KEY_DEFAULT_SONNET,
             KEY_DEFAULT_HAIKU,
             KEY_DEPRECATED_SMALL_FAST,
+            KEY_GATEWAY_MODEL_DISCOVERY,
         ] {
             env.remove(k);
         }
@@ -222,6 +233,7 @@ mod tests {
             opus_model: "claude-opus-4-8".into(),
             sonnet_model: "claude-sonnet-4-6".into(),
             haiku_model: "claude-haiku-4-5-20251001".into(),
+            gateway_model_discovery: true,
         }
     }
 
@@ -362,6 +374,24 @@ mod tests {
         assert!(v["env"].get(KEY_BASE_URL).is_none());
         assert!(v["env"].get(KEY_AUTH_TOKEN).is_none());
         assert_eq!(v["env"]["MY_OWN_VAR"], "keepme");
+        assert!(v["env"].get(KEY_GATEWAY_MODEL_DISCOVERY).is_none());
+    }
+
+    /// StarNexus 网关打开模型发现，/model 列表才会出现 Fable 等客户端不自带的模型；
+    /// 其他服务不碰这一项：不加，也不删用户自己设的
+    #[test]
+    fn gateway_model_discovery_only_when_asked() {
+        let v: Value = serde_json::from_str(&merge(None, &s()).unwrap()).unwrap();
+        assert_eq!(v["env"][KEY_GATEWAY_MODEL_DISCOVERY], "1");
+
+        let mut other = s();
+        other.gateway_model_discovery = false;
+        let v: Value = serde_json::from_str(&merge(None, &other).unwrap()).unwrap();
+        assert!(v["env"].get(KEY_GATEWAY_MODEL_DISCOVERY).is_none());
+
+        let own = r#"{"env":{"CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY":"1"}}"#;
+        let v: Value = serde_json::from_str(&merge(Some(own), &other).unwrap()).unwrap();
+        assert_eq!(v["env"][KEY_GATEWAY_MODEL_DISCOVERY], "1");
     }
 
     #[test]

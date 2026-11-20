@@ -23,6 +23,12 @@ export function configurationMatches(
     && (tool !== "codex" || env.codex.currentReasoningEffort === reasoningEffort);
 }
 
+/** 桌面版 inferenceModels 应有的内容：所选模型在前（第一个是默认），再补网关上的其他模型；去重、去空。和后端 model_list_with 一致 */
+export function desktopModels(request: Pick<ApplyRequest, "claudeModel" | "claudeOpusModel" | "claudeSonnetModel" | "claudeHaikuModel" | "claudeDesktopExtraModels">): string[] {
+  const all = [request.claudeModel, request.claudeOpusModel, request.claudeSonnetModel, request.claudeHaikuModel, ...(request.claudeDesktopExtraModels ?? [])];
+  return [...new Set(all.map(name => name?.trim()).filter((name): name is string => !!name))];
+}
+
 /** Launch is read-only, including tray launches. Changes require a separate save. */
 export async function launchWithConfiguration(
   tool: ToolId, mode: LaunchMode, service: string, directory: string,
@@ -76,7 +82,7 @@ async function prepareConfiguration(
     if (tool === "codex") return !(independent && value.codex.builtinRelay);
     const actual = value[claudeDesktop ? "claudeDesktop" : "claude"].configuredModels;
     const aliases = [request.claudeOpusModel, request.claudeSonnetModel, request.claudeHaikuModel].map(name => name || "");
-    const expected = claudeDesktop ? [...new Set([request.claudeModel, ...aliases].map(name => name?.trim()).filter(Boolean))] : aliases;
+    const expected = claudeDesktop ? desktopModels(request) : aliases;
     return !actual || JSON.stringify(actual) === JSON.stringify(expected);
   };
   if (matches(env)) return;

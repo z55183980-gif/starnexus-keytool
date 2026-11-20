@@ -143,6 +143,7 @@ export interface RemoteConfig {
   claude_opus_model: string;
   claude_sonnet_model: string;
   claude_haiku_model: string;
+  claude_desktop_extra_models: string[];
   min_client_version: string;
   notice: string;
   write_mode: string;
@@ -195,6 +196,8 @@ export interface ApplyRequest {
   claudeHaikuModel: string;
   /** 写 Claude 桌面版自己的第三方推理配置（和 configureClaude 写的 CLI 配置是两份） */
   configureClaudeDesktop?: boolean;
+  /** 桌面版模型菜单在所选模型之后补上的网关模型（其他服务的密钥传空）。写入和写后核对用同一份 */
+  claudeDesktopExtraModels?: string[];
 }
 
 export interface ApplyResult {

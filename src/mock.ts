@@ -80,6 +80,7 @@ export function mockRemote(): RemoteConfig {
     claude_opus_model: "claude-opus-5-5",
     claude_sonnet_model: "claude-sonnet-5-5",
     claude_haiku_model: "claude-sonnet-5-5",
+    claude_desktop_extra_models: ["claude-fable-5-2", "claude-sonnet-4-6"],
     min_client_version: "",
     notice: "",
     write_mode: "provider_table",

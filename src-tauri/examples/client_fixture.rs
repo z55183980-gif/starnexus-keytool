@@ -32,7 +32,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     fs::write(dir.join("settings.json"), claude_config::merge(None, &ClaudeSettings {
         base_url: base.into(), auth_token: key.into(), model: "claude-sonnet-4-5".into(),
         opus_model: "claude-sonnet-4-5".into(), sonnet_model: "claude-sonnet-4-5".into(),
-        haiku_model: "claude-sonnet-4-5".into(),
+        haiku_model: "claude-sonnet-4-5".into(), gateway_model_discovery: true,
     })?)?;
     Ok(())
 }

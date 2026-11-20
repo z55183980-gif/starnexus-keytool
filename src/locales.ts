@@ -750,6 +750,8 @@ export const DICT: Record<string, [string, string]> = {
   "Claude 桌面版配置文件格式损坏，需手动修复": ["Claude 桌面版設定檔格式損壞，須手動修復", "Claude desktop's config file is corrupted and needs a manual fix"],
   "Claude 桌面版服务地址不对": ["Claude 桌面版服務位址不正確", "Claude desktop's service URL is wrong"],
   "Claude 桌面版用了其他认证方式，可能不生效": ["Claude 桌面版使用了其他認證方式，可能不會生效", "Claude desktop uses another sign-in method; the key may not take effect"],
+  "Claude 桌面版的模型菜单缺少网关上的其他 Claude 模型": ["Claude 桌面版的模型選單缺少閘道上的其他 Claude 模型", "Claude desktop's model menu is missing other Claude models from the gateway"],
+  "Claude Code 没有打开网关模型发现，/model 列表缺少网关上的其他模型": ["Claude Code 沒有開啟閘道模型探索，/model 清單缺少閘道上的其他模型", "Claude Code has gateway model discovery off, so /model is missing other gateway models"],
   "Claude 桌面版还没重新打开，新配置尚未生效：请完全退出（包括托盘图标）后再打开": ["Claude 桌面版尚未重新開啟，新設定仍未生效：請完全結束（包括系統匣圖示）後再開啟", "Claude desktop hasn't been reopened, so the new config isn't active yet: quit it completely (including the tray icon) and reopen it"],
 
   // —— 写入后重启桌面客户端 ——

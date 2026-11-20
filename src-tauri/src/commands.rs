@@ -593,6 +593,10 @@ pub struct ApplyRequest {
     // —— Claude 桌面版（第三方推理配置，和 CLI 的 settings.json 是两份）——
     #[serde(default)]
     pub configure_claude_desktop: bool,
+    /// 桌面版模型菜单补上的网关模型，由前端随请求带来，写后核对用的也是这一份。
+    /// 老前端不带时按远程配置（其他服务的密钥一律不补）
+    #[serde(default)]
+    pub claude_desktop_extra_models: Option<Vec<String>>,
 }
 
 #[derive(Debug, Serialize, Default)]
@@ -812,6 +816,7 @@ pub fn apply_config_blocking(req: ApplyRequest) -> Result<ApplyResult> {
             opus_model: req.claude_opus_model.clone(),
             sonnet_model: req.claude_sonnet_model.clone(),
             haiku_model: req.claude_haiku_model.clone(),
+            gateway_model_discovery: !profile.is_custom(),
         };
         let merged = claude_config::merge(existing.as_deref(), &settings)?;
         txn.stage_text(&claude_path, existing.as_deref(), Some(&merged));
@@ -823,12 +828,17 @@ pub fn apply_config_blocking(req: ApplyRequest) -> Result<ApplyResult> {
     // 写入后桌面版会把明文密钥加密；记下这次写入的条目，之后才能认出那段密文
     let mut desktop_written: Option<(String, claude_desktop::Current)> = None;
     if let Some((path, meta_before, new_meta, existing)) = existing_desktop {
-        let models = claude_desktop::model_list(&[
-            &req.claude_model,
-            &req.claude_opus_model,
-            &req.claude_sonnet_model,
-            &req.claude_haiku_model,
-        ]);
+        // 先放用户选的默认模型和别名模型（第一个是桌面版的默认），再补网关上其余的 Claude 模型；
+        // 其他服务的密钥不补，那边没有这些模型
+        let extra = match (&req.claude_desktop_extra_models, profile.is_custom()) {
+            (_, true) => Vec::new(),
+            (Some(list), false) => list.clone(),
+            (None, false) => crate::updates::configuration()?.claude_desktop_extra_models,
+        };
+        let models = claude_desktop::model_list_with(
+            &[&req.claude_model, &req.claude_opus_model, &req.claude_sonnet_model, &req.claude_haiku_model],
+            &extra,
+        );
         let merged = claude_desktop::merge(existing.as_deref(), &anthropic_base, &api_key, &models)?;
         desktop_written = claude_desktop::current(&merged).map(|current| (path.to_string_lossy().to_string(), current));
         if existing.as_deref() != Some(merged.as_str()) {
@@ -1051,6 +1061,7 @@ fn repair_claude_env_blocking(req: ApplyRequest) -> Result<ApplyResult> {
         opus_model: req.claude_opus_model,
         sonnet_model: req.claude_sonnet_model,
         haiku_model: req.claude_haiku_model,
+        gateway_model_discovery: !profile.is_custom(),
     };
     let merged = claude_config::merge(Some(&repaired), &settings)?;
     let mut txn = TwoFileTxn::new();
@@ -1211,6 +1222,7 @@ pub async fn run_health(req: &HealthRequest, cache: &HealthCache) -> Result<Vec<
                             service,
                             restart_pending,
                             claude_desktop::official_login_chosen(),
+                            &crate::updates::configuration()?.claude_desktop_extra_models,
                         ),
                         health::current_claude_desktop(text.as_deref(), &anthropic_base, |sealed, current| {
                             let config = path.to_string_lossy();

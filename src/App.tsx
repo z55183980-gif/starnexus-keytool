@@ -441,6 +441,7 @@ export default function App() {
         claudeOpusModel: claudeAliases.opus,
         claudeSonnetModel: claudeAliases.sonnet,
         claudeHaikuModel: claudeAliases.haiku,
+        claudeDesktopExtraModels: p?.custom ? [] : remote?.claude_desktop_extra_models ?? [],
       });
       logResult(r);
       setToast({
@@ -513,6 +514,7 @@ export default function App() {
         cleanupResidue: false, overwriteOfficialAuth: false, conservative,
         claudeModel: modelFor("claude", p),
         claudeOpusModel: claudeAliases.opus, claudeSonnetModel: claudeAliases.sonnet, claudeHaikuModel: claudeAliases.haiku,
+        claudeDesktopExtraModels: p?.custom ? [] : remote?.claude_desktop_extra_models ?? [],
       };
       if (action === "save") {
         let backupId = "";

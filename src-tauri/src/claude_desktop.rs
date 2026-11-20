@@ -258,6 +258,12 @@ pub fn model_list(models: &[&str]) -> Vec<String> {
     out
 }
 
+/// 用户选的模型在前（第一个是默认），网关上其余要露出的模型补在后面；去重、去空
+pub fn model_list_with(chosen: &[&str], extra: &[String]) -> Vec<String> {
+    let all: Vec<&str> = chosen.iter().copied().chain(extra.iter().map(String::as_str)).collect();
+    model_list(&all)
+}
+
 pub fn merge(
     text: Option<&str>,
     base_url: &str,
@@ -364,6 +370,24 @@ mod tests {
         assert_eq!(c.models, vec!["claude-opus-5-5", "claude-sonnet-5-5"]);
         let v: Value = serde_json::from_str(&out).unwrap();
         assert_eq!(v["builtinBrowserEnabled"], Value::Bool(true));
+    }
+
+    /// 写了 inferenceModels 桌面版就不再自动发现，网关上其余的 Claude 模型要补进列表才看得到；
+    /// 默认模型仍排第一，用户已选的不重复
+    #[test]
+    fn extra_models_follow_the_chosen_ones() {
+        let extra = vec!["claude-fable-5-2".to_string(), "claude-sonnet-4-6".to_string()];
+        let chosen = ["claude-opus-5-5", "claude-opus-5-5", "claude-sonnet-5-5", "claude-sonnet-5-5"];
+        assert_eq!(
+            model_list_with(&chosen, &extra),
+            ["claude-opus-5-5", "claude-sonnet-5-5", "claude-fable-5-2", "claude-sonnet-4-6"]
+        );
+        let fable_default = ["claude-fable-5-2", "claude-opus-5-5", "claude-sonnet-5-5", ""];
+        assert_eq!(
+            model_list_with(&fable_default, &extra),
+            ["claude-fable-5-2", "claude-opus-5-5", "claude-sonnet-5-5", "claude-sonnet-4-6"]
+        );
+        assert_eq!(model_list_with(&["m"], &[]), ["m"]);
     }
 
     #[test]

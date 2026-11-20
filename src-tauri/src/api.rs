@@ -15,6 +15,9 @@ pub struct RemoteConfig {
     pub claude_opus_model: String,
     pub claude_sonnet_model: String,
     pub claude_haiku_model: String,
+    /// 桌面版模型菜单在上面几个模型之外再列出的网关模型（只给 StarNexus 密钥加）。
+    /// 桌面版的 `inferenceModels` 一旦写了就不再去网关自动发现，不列在这里的模型菜单里看不到
+    pub claude_desktop_extra_models: Vec<String>,
     pub min_client_version: String,
     pub notice: String,
     pub write_mode: String,
@@ -39,6 +42,8 @@ pub fn builtin_defaults() -> RemoteConfig {
         claude_opus_model: "claude-opus-5-5".into(),
         claude_sonnet_model: "claude-sonnet-5-5".into(),
         claude_haiku_model: "claude-sonnet-5-5".into(),
+        // 网关上另外两个 Claude 模型：命令行靠网关模型发现补进 /model 列表，桌面版靠这里
+        claude_desktop_extra_models: vec!["claude-fable-5-2".into(), "claude-sonnet-4-6".into()],
         min_client_version: String::new(),
         notice: String::new(),
         write_mode: "provider_table".into(),

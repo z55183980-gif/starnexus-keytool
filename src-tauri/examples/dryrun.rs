@@ -130,6 +130,7 @@ fn main() {
             opus_model: "claude-opus-4-8".into(),
             sonnet_model: "claude-sonnet-4-6".into(),
             haiku_model: "claude-haiku-4-5-20251001".into(),
+            gateway_model_discovery: true,
         };
         println!("推导出的 ANTHROPIC_BASE_URL: {}", settings.base_url);
 

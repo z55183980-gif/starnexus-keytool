@@ -5,7 +5,7 @@
 
 use crate::claude_config::{
     KEY_AUTH_TOKEN, KEY_BASE_URL, KEY_DEFAULT_HAIKU, KEY_DEFAULT_OPUS, KEY_DEFAULT_SONNET,
-    KEY_LEGACY_API_KEY, KEY_MODEL,
+    KEY_GATEWAY_MODEL_DISCOVERY, KEY_LEGACY_API_KEY, KEY_MODEL,
 };
 use crate::{codex_auth, codex_config};
 use serde::{Deserialize, Serialize};
@@ -156,6 +156,10 @@ pub fn check_claude(text: Option<&str>, anthropic_base: &str, service: Service) 
         if on_gateway && non_empty(env, KEY_LEGACY_API_KEY) {
             out.push(issue("C4", Level::Warn, "同时设置了两种密钥，可能冲突", Fix::Rewrite));
         }
+        // v0.2.11 之前写的配置没有这一项；「沿用当前配置」启动不会重写，只能靠这里提示修复
+        if on_gateway && !non_empty(env, KEY_GATEWAY_MODEL_DISCOVERY) {
+            out.push(issue("C7", Level::Warn, "Claude Code 没有打开网关模型发现，/model 列表缺少网关上的其他模型", Fix::Rewrite));
+        }
     }
     if value.get("apiKeyHelper").is_some()
         || [
@@ -182,6 +186,7 @@ pub fn check_claude_desktop(
     service: Service,
     restart_pending: bool,
     official_chosen: bool,
+    extra_models: &[String],
 ) -> Vec<Issue> {
     let mut out = Vec::new();
     let Some(text) = text.filter(|t| !t.trim().is_empty()) else {
@@ -202,6 +207,11 @@ pub fn check_claude_desktop(
         }
         if c.other_credentials || c.credential_kind.as_deref().is_some_and(|k| k != "static") {
             out.push(issue("D3", Level::Warn, "Claude 桌面版用了其他认证方式，可能不生效", Fix::Rewrite));
+        }
+        // 写了模型列表桌面版就不再自动发现：列表里缺的网关模型菜单里看不到。
+        // 老版本写的配置只有默认和别名模型，「沿用当前配置」启动不会重写，只能靠这里提示修复
+        if !c.models.is_empty() && extra_models.iter().any(|m| !m.trim().is_empty() && !c.models.iter().any(|x| x == m.trim())) {
+            out.push(issue("D6", Level::Warn, "Claude 桌面版的模型菜单缺少网关上的其他 Claude 模型", Fix::Rewrite));
         }
     }
     // 选了官方登录时重开也不会用这份配置，D4 的「重新打开」提示没有意义
@@ -458,7 +468,7 @@ mod tests {
         format!(r#"{{"env":{env}}}"#)
     }
 
-    const FULL: &str = r#"{"ANTHROPIC_BASE_URL":"https://gateway.dkby.com","ANTHROPIC_AUTH_TOKEN":"sk-x","ANTHROPIC_DEFAULT_OPUS_MODEL":"o","ANTHROPIC_DEFAULT_SONNET_MODEL":"s","ANTHROPIC_DEFAULT_HAIKU_MODEL":"h"}"#;
+    const FULL: &str = r#"{"ANTHROPIC_BASE_URL":"https://gateway.dkby.com","ANTHROPIC_AUTH_TOKEN":"sk-x","ANTHROPIC_DEFAULT_OPUS_MODEL":"o","ANTHROPIC_DEFAULT_SONNET_MODEL":"s","ANTHROPIC_DEFAULT_HAIKU_MODEL":"h","CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY":"1"}"#;
 
     fn desktop(provider: &str, url: &str, extra: &str) -> String {
         format!(r#"{{"inferenceProvider":"{provider}","inferenceGatewayBaseUrl":"{url}","inferenceGatewayApiKey":"sk-1"{extra}}}"#)
@@ -467,22 +477,49 @@ mod tests {
     #[test]
     fn desktop_rules() {
         let ok = desktop("gateway", CLAUDE_BASE, r#","inferenceCredentialKind":"static""#);
-        assert!(check_claude_desktop(Some(&ok), CLAUDE_BASE, Service::Current, false, false).is_empty());
-        assert!(check_claude_desktop(None, CLAUDE_BASE, Service::Current, false, false).is_empty());
-        assert_eq!(ids(&check_claude_desktop(Some("{x"), CLAUDE_BASE, Service::Ai, false, false)), ["D1"]);
+        assert!(check_claude_desktop(Some(&ok), CLAUDE_BASE, Service::Current, false, false, &[]).is_empty());
+        assert!(check_claude_desktop(None, CLAUDE_BASE, Service::Current, false, false, &[]).is_empty());
+        assert_eq!(ids(&check_claude_desktop(Some("{x"), CLAUDE_BASE, Service::Ai, false, false, &[])), ["D1"]);
         let v1 = desktop("gateway", "https://gateway.dkby.com/v1", "");
-        assert_eq!(ids(&check_claude_desktop(Some(&v1), CLAUDE_BASE, Service::Current, false, false)), ["D2"]);
+        assert_eq!(ids(&check_claude_desktop(Some(&v1), CLAUDE_BASE, Service::Current, false, false, &[])), ["D2"]);
         // 选了 AI 密钥时启动会重写，地址问题不提前报
-        assert!(check_claude_desktop(Some(&v1), CLAUDE_BASE, Service::Ai, false, false).is_empty());
+        assert!(check_claude_desktop(Some(&v1), CLAUDE_BASE, Service::Ai, false, false, &[]).is_empty());
         let helper = desktop("gateway", CLAUDE_BASE, r#","inferenceCredentialHelper":"x""#);
-        assert_eq!(ids(&check_claude_desktop(Some(&helper), CLAUDE_BASE, Service::Current, false, false)), ["D3"]);
-        assert_eq!(ids(&check_claude_desktop(Some(&ok), CLAUDE_BASE, Service::Ai, true, false)), ["D4"]);
-        assert!(check_claude_desktop(Some(&ok), CLAUDE_BASE, Service::Official, true, false).is_empty());
-        assert!(check_claude_desktop(Some(&ok), CLAUDE_BASE, Service::Current, true, true).is_empty());
-        assert!(check_claude_desktop(Some(&ok), CLAUDE_BASE, Service::Ai, false, true).is_empty());
-        assert!(check_claude_desktop(Some(&ok), CLAUDE_BASE, Service::Official, false, true).is_empty());
+        assert_eq!(ids(&check_claude_desktop(Some(&helper), CLAUDE_BASE, Service::Current, false, false, &[])), ["D3"]);
+        assert_eq!(ids(&check_claude_desktop(Some(&ok), CLAUDE_BASE, Service::Ai, true, false, &[])), ["D4"]);
+        assert!(check_claude_desktop(Some(&ok), CLAUDE_BASE, Service::Official, true, false, &[]).is_empty());
+        assert!(check_claude_desktop(Some(&ok), CLAUDE_BASE, Service::Current, true, true, &[]).is_empty());
+        assert!(check_claude_desktop(Some(&ok), CLAUDE_BASE, Service::Ai, false, true, &[]).is_empty());
+        assert!(check_claude_desktop(Some(&ok), CLAUDE_BASE, Service::Official, false, true, &[]).is_empty());
         let bedrock = desktop("bedrock", CLAUDE_BASE, "");
-        assert!(check_claude_desktop(Some(&bedrock), CLAUDE_BASE, Service::Ai, false, true).is_empty());
+        assert!(check_claude_desktop(Some(&bedrock), CLAUDE_BASE, Service::Ai, false, true, &[]).is_empty());
+    }
+
+    /// v0.2.11 之前写的 CLI 配置没有打开网关模型发现：沿用当前配置时提示（C7），其他情况不报
+    #[test]
+    fn c7_gateway_model_discovery_missing() {
+        let old = format!(r#"{{"env":{}}}"#, FULL.replace(r#","CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY":"1""#, ""));
+        assert_eq!(ids(&check_claude(Some(&old), CLAUDE_BASE, Service::Current)), ["C7"]);
+        assert!(check_claude(Some(&old), CLAUDE_BASE, Service::Ai).is_empty());
+        assert!(check_claude(Some(&old), CLAUDE_BASE, Service::Official).is_empty());
+        let other = r#"{"env":{"ANTHROPIC_BASE_URL":"https://relay.example","ANTHROPIC_AUTH_TOKEN":"sk-x"}}"#;
+        assert!(check_claude(Some(other), CLAUDE_BASE, Service::Current).is_empty());
+    }
+
+    /// 老版本只写了默认和别名模型：沿用当前配置时提示补上网关上的其他模型（D6）
+    #[test]
+    fn desktop_model_list_missing_gateway_models() {
+        let extra = ["claude-fable-5-2".to_string(), "claude-sonnet-4-6".to_string()];
+        let old = desktop("gateway", CLAUDE_BASE, r#","inferenceModels":["claude-opus-5-5","claude-sonnet-5-5"]"#);
+        assert_eq!(ids(&check_claude_desktop(Some(&old), CLAUDE_BASE, Service::Current, false, false, &extra)), ["D6"]);
+        let full = desktop("gateway", CLAUDE_BASE, r#","inferenceModels":["claude-fable-5-2","claude-opus-5-5","claude-sonnet-4-6"]"#);
+        assert!(check_claude_desktop(Some(&full), CLAUDE_BASE, Service::Current, false, false, &extra).is_empty());
+        // 没写列表 = 桌面版自己去网关发现，不缺；其他网关、切换到别的服务时不报
+        let discover = desktop("gateway", CLAUDE_BASE, "");
+        assert!(check_claude_desktop(Some(&discover), CLAUDE_BASE, Service::Current, false, false, &extra).is_empty());
+        let other = desktop("gateway", "https://relay.example", r#","inferenceModels":["m"]"#);
+        assert!(check_claude_desktop(Some(&other), CLAUDE_BASE, Service::Current, false, false, &extra).is_empty());
+        assert!(check_claude_desktop(Some(&old), CLAUDE_BASE, Service::Official, false, false, &extra).is_empty());
     }
 
     #[test]
@@ -530,7 +567,8 @@ mod tests {
     fn c2_missing_alias() {
         let t = claude(r#"{"ANTHROPIC_BASE_URL":"https://gateway.dkby.com","ANTHROPIC_DEFAULT_OPUS_MODEL":"o"}"#);
         assert_eq!(ids(&check_claude(Some(&t), CLAUDE_BASE, Service::Ai)), ["C2"]);
-        assert_eq!(ids(&check_claude(Some(&t), CLAUDE_BASE, Service::Current)), ["C2"]);
+        // 老配置同时也没打开网关模型发现
+        assert_eq!(ids(&check_claude(Some(&t), CLAUDE_BASE, Service::Current)), ["C2", "C7"]);
         // 切回官方时不提示
         assert!(check_claude(Some(&t), CLAUDE_BASE, Service::Official).is_empty());
         // 没指向网关时别名无所谓
